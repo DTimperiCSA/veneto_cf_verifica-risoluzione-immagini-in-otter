@@ -13,9 +13,6 @@ from src.image_processing import *
 from logs.logger import CSVLogger
 
 if __name__ == "__main__":
-    # Load super-resolution model
-
-
 
     # Ensure output directories exist
     super_resolution_dir, downscaling_dir = find_output_dir()
@@ -24,24 +21,24 @@ if __name__ == "__main__":
     for current_dir, subforlder, filenames in os.walk(INPUT_IMAGES_DIR):
 
         for filename in tqdm(filenames, desc=f"🔍 Scanning file in {current_dir}"):
-
-
-
-                full_path = os.path.join(current_dir, filename)
-                """
+            full_path = os.path.join(current_dir, filename)
+            sr_out = apply_super_resolution_single(full_path, super_resolution_dir)
+            ds_out = apply_personalized_downscaling_single(sr_out, downscaling_dir)
+            """
+            if true:
                 print(f"Processing file: {full_path}")
                 print("Checking if file is a valid image...")
                 print("applying super-resolution...")
                 print("checking if image is valid...")
                 print("applying personalized downscaling...")
                 print("check if image is valid...")
-                """
-                print(filename)
-                success, error = is_valid_image_file(Path(full_path))
-                if not success:
-                    #csv_error_writer.append((full_path, "time", "image problems", "super res problems", "downscaling problems", error))
-                    print("Invalid image file:", full_path, error)
-                    continue
+             """
+            print(filename)
+            success, error = is_valid_image_file(Path(full_path))
+            if not success:
+                #csv_error_writer.append((full_path, "time", "image problems", "super res problems", "downscaling problems", error))
+                print("Invalid image file:", full_path, error)
+                continue
 
         print(f"Process recap")
         print(f"directory exolored: {current_dir}")

@@ -1,10 +1,8 @@
 # processing.py
 
-import os
 import numpy as np
-
-from pathlib import Path
 from PIL import Image
+from pathlib import Path
 
 from src.utils import *
 from src.paths import *
@@ -45,8 +43,8 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path) -> Path:
         output_path.unlink()
 
     output_img.save(output_path)
-
     return output_path
+
 
 def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) -> Path:
     """
@@ -60,7 +58,7 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         Path: Output path of the resized image.
     """
     try:
-        requested_PPI = int(image_path.name.split("_")[-1].split(".")[0])
+        requested_PPI = int(image_path.stem.split("_")[-1])
     except ValueError:
         raise ValueError(f"Invalid PPI in filename: {image_path.name}")
 
@@ -88,5 +86,4 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     resized_img.save(output_path, dpi=(requested_PPI, requested_PPI))
-
     return output_path

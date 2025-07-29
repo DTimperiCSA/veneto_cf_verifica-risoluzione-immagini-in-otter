@@ -11,16 +11,14 @@ class CSVLogger:
         self.lock = threading.Lock()
         self.running = True
 
-        # Structure: {filename: row_dict}
+        # mappa filename -> last error/failure info (una riga per immagine con errore)
         self.rows = {}
-
-        # Define consistent fieldnames
-        self.fieldnames = ["timestamp", "directory", "filename", "step", "status", "error"]
+        self.fieldnames = ["timestamp", "filename", "step", "status", "error"]
 
         if self.csv_path.exists():
             self._load_existing()
 
-        # Start autosave thread
+        # thread di autosalvataggio
         self.autosave_thread = threading.Thread(target=self._autosave_loop, daemon=True)
         self.autosave_thread.start()
 
@@ -28,27 +26,27 @@ class CSVLogger:
         with open(self.csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                self.rows[row["filename"]] = row
+                # Carica solo righe con errore (status = false)
+                if row["status"] == "false":
+                    self.rows[row["filename"]] = row
 
-    def log(self, directory: str, filename: str, step: str, success: bool, error: str = ""):
+    def log_failure(self, filename: str, step: str, error: str):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         with self.lock:
             self.rows[filename] = {
                 "timestamp": timestamp,
-                "directory": directory,
                 "filename": filename,
-                "step": "completed" if success and step == "completed" else (step if success else f"FAILED_AT_{step}"),
-                "status": "true" if success else "false",
-                "error": "" if success else error,
+                "step": step,
+                "status": "false",
+                "error": error,
             }
 
     def log_crash(self, error: str):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
-        crash_id = f"CRASH_{timestamp}"
         with self.lock:
+            crash_id = f"CRASH_{timestamp}"
             self.rows[crash_id] = {
                 "timestamp": timestamp,
-                "directory": "",
                 "filename": "CRASH",
                 "step": "CRASH",
                 "status": "false",
