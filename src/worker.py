@@ -2,7 +2,7 @@ import os
 
 from pathlib import Path
 
-from src.processing import apply_super_resolution_single, apply_personalized_downscaling_single
+from src.image_processing import apply_super_resolution_single, apply_personalized_downscaling_single
 from logs.logger import CSVLogger
 
 class ImageWorker:
