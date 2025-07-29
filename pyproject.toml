@@ -1,5 +1,4 @@
 [project]
-name = "veneto_cf_verifica_risoluzione_immagini_in_otter"
 version = "0.1.0"
 description = "Default template for PDM package"
 authors = [
@@ -12,4 +11,4 @@ license = {text = "MIT"}
 
 
 [tool.pdm]
-distribution = false
+distribution = true

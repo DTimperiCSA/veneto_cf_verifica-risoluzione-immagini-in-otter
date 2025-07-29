@@ -1,7 +1,10 @@
-import numpy as np
 import os
 
+import numpy as np
+
 from PIL import Image
+from pathlib import Path
+from typing import Tuple
 
 from src.paths import *
 from src.config import *
@@ -29,19 +32,34 @@ def find_output_dir() -> tuple[Path, Path]:
     Raises:
         ValueError: If scale factor is unsupported.
     """
-    if SUPER_RESOLUTION_PAR == 2:
-        super_res_dir = IMAGES_SR_X2_DIR
-        downscaling_dir = IMAGES_DOWNSIZED_X2_DIR
-    elif SUPER_RESOLUTION_PAR == 3:
-        super_res_dir = IMAGES_SR_X3_DIR
-        downscaling_dir = IMAGES_DOWNSIZED_X3_DIR
-    elif SUPER_RESOLUTION_PAR == 4:
-        super_res_dir = IMAGES_SR_X4_DIR
-        downscaling_dir = IMAGES_DOWNSIZED_X4_DIR
+    if 2 <= SUPER_RESOLUTION_PAR <= 4:
+        final_super_res_suffix = f"x{SUPER_RESOLUTION_PAR}"
     else:
-        raise ValueError("Unsupported super resolution scale. Supported values are 2, 3, or 4.")
-    
+        raise ValueError("SUPER_RESOLUTION_PAR must be 2, 3, or 4.")
+
+    # Dynamically construct directories
+    super_res_dir = os.path.join(OUTPUT_IMAGES_DIR, f"sr_{final_super_res_suffix}")
+    downscaling_dir = os.path.join(OUTPUT_IMAGES_DIR, f"downscaled_{final_super_res_suffix}")
+
+    # Create directories if they don’t exist
     os.makedirs(super_res_dir, exist_ok=True)
     os.makedirs(downscaling_dir, exist_ok=True)
 
     return super_res_dir, downscaling_dir
+
+def is_valid_image_file(file_path: Path) -> Tuple[bool, str]:
+    """
+    Checks if the file is a valid image using PIL verification only.
+
+    Args:
+        file_path (Path): Path to the file.
+
+    Returns:
+        Tuple[bool, str]: (True, "") if valid image, (False, error message) otherwise.
+    """
+    try:
+        with Image.open(file_path) as img:
+            img.verify()
+        return True, ""
+    except Exception as e:
+        return False, f"Invalid image: {e}"
