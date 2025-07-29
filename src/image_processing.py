@@ -4,30 +4,20 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 
-from src.utils import *
-from src.paths import *
-from src.config import *
+from mutliprocess_and_multithread.utils import *
+from mutliprocess_and_multithread.paths import *
+from mutliprocess_and_multithread.config import *
 from model.SR_Script.super_resolution import SA_SuperResolution
 
-try:
-    model = SA_SuperResolution(
-        models_dir=SR_SCRIPT_MODEL_DIR,
-        model_scale=SUPER_RESOLUTION_PAR,
-        tile_size=128,
-        gpu_id=0,
-        verbosity=True,
-    )
-except Exception as e:
-    raise RuntimeError(f"Errore durante il caricamento del modello di super-risoluzione: {e}")
 
-
-def apply_super_resolution_single(image_path: Path, output_dir: Path) -> Path:
+def apply_super_resolution_single(image_path: Path, output_dir: Path, sr_model: SA_SuperResolution) -> Path:
     """
     Apply super-resolution model to a single image.
 
     Args:
         image_path (Path): Path to input image.
         output_dir (Path): Directory to save super-resolved image.
+        sr_model (SA_SuperResolution): Preloaded super-resolution model instance.
 
     Returns:
         Path: Output path of the super-resolved image.
@@ -43,7 +33,7 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path) -> Path:
         raise RuntimeError(f"Failed to load or convert image {image_path}: {e}")
 
     try:
-        upscaled_image_np = model.run(img_np)
+        upscaled_image_np = sr_model.run(img_np)
         output_img = numpy_to_image(upscaled_image_np)
     except Exception as e:
         raise RuntimeError(f"Super-resolution model failed for {image_path}: {e}")

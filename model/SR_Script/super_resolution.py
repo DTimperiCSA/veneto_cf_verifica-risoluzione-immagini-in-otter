@@ -1,5 +1,6 @@
 import os
 from typing import Any, Dict, List, Tuple, Optional  
+import threading
 
 import torch  # NOQA
 import numpy as np
@@ -12,7 +13,10 @@ from .tiling_image_loader import SA_Tiling_ImageLoader
 
 class SA_SuperResolution:
     """
-    A class to apply super-resolution on images using a specific model.
+    A class to apply super-resolution on images using a specific ONNX model.
+
+    Supports thread-safe inference via internal lock.
+    For multiprocessing, instantiate one object per process.
     """
 
     def __init__(
@@ -24,18 +28,21 @@ class SA_SuperResolution:
         verbosity: bool = False,
     ) -> None:
         """
-        Initializes the SA_SuperResolution class with the model path and scale.
+        Initialize with model directory, scale, and device info.
 
-        Parameters:
-            models_dir (str): The path to the encrypted models dir.
-            model_scale (int): The scale factor for the super-resolution process.
-            tile_size (int): The tile size to pass to the image loader. Default is 128.
-            gpu_id (int): Index of the GPU to use. CPU is -1. Default is 0.
-            verbosity (bool): Verbosity of the model printing. Defaults is False.
+        Args:
+            models_dir (str): Directory path to encrypted model files.
+            model_scale (int): Super-resolution scale factor.
+            tile_size (int): Tile size for image loader (default 128).
+            gpu_id (int): GPU index (>=0 for GPU, -1 for CPU).
+            verbosity (bool): Print debug info.
         """
         self.scale: int = model_scale
         self.tile_size: int = tile_size
         self.encrypted_model_path: str = self._model_definition(models_dir)
+
+        # Thread lock to make ONNX Runtime calls thread-safe
+        self.lock = threading.Lock()
 
         self.network, self.input_name = self._decrypt_model(gpu_id, verbosity)
         self.dataloader: SA_Tiling_ImageLoader = SA_Tiling_ImageLoader(self.tile_size)
@@ -50,7 +57,11 @@ class SA_SuperResolution:
         decryption_key: Optional[bytes] = None
     ) -> Tuple[ort.InferenceSession, str]:
         """
-        Decodes an encrypted ONNX model and initializes an ONNX Runtime inference session.
+        Decrypt the ONNX model and initialize ONNX Runtime session.
+
+        Returns:
+            model (ort.InferenceSession): ONNX runtime model.
+            input_name (str): Name of the input tensor.
         """
         with open(self.encrypted_model_path, "rb") as encrypted_file:
             encrypted_model = encrypted_file.read()
@@ -63,11 +74,10 @@ class SA_SuperResolution:
         fernet = Fernet(key)
         decrypted_model = fernet.decrypt(encrypted_model)
 
-        # Provider list with fallback
-        providers: List[str | Tuple[str, Dict[str, Any]]] = [
-            "CPUExecutionProvider"
-        ]
+        # Default to CPU provider
+        providers: List[Any] = ["CPUExecutionProvider"]
 
+        # If GPU requested and available, add CUDA provider with config
         if gpu_id >= 0 and ort.get_device() == "GPU":
             providers.insert(0, (
                 "CUDAExecutionProvider",
@@ -100,7 +110,7 @@ class SA_SuperResolution:
             print(f"❌ Failed to initialize model on GPU: {e}")
             print("➡️ Falling back to CPUExecutionProvider")
 
-            # Retry with CPU only
+            # Fallback to CPU only
             model = ort.InferenceSession(decrypted_model, providers=["CPUExecutionProvider"])
             input_name = model.get_inputs()[0].name
             return model, input_name
@@ -108,28 +118,29 @@ class SA_SuperResolution:
 
     def _inference(self, tile: torch.Tensor) -> torch.Tensor:
         """
-        Performs inference on a single image tile using an ONNX model.
+        Perform thread-safe inference on one image tile.
 
         Args:
-            tile (torch.Tensor): The image tile on which to perform inference.
+            tile (torch.Tensor): Input tile tensor.
 
         Returns:
-            torch.Tensor: The inference result as a PyTorch tensor.
+            torch.Tensor: Output tensor after super-resolution.
         """
-        input_tile = {self.input_name: tile.numpy()}
-        output_tile = self.network.run(None, input_tile)
+        with self.lock:  # serialize inference calls for thread safety
+            input_tile = {self.input_name: tile.numpy()}
+            output_tile = self.network.run(None, input_tile)
         output_tensor = torch.from_numpy(output_tile[0])
         return output_tensor
 
     def run(self, img_np: np.ndarray) -> np.ndarray:
         """
-        Runs the super-resolution process on an input image.
+        Run the super-resolution model on the full image.
 
-        Parameters:
-            img_np (np.ndarray): The numpy array representing the image in RGB format.
+        Args:
+            img_np (np.ndarray): Input image RGB as numpy array.
 
         Returns:
-            np.ndarray: The super-resolved output image.
+            np.ndarray: Super-resolved output image as numpy uint8 array.
         """
         img_tiles, original_shape, padded_shape = self.dataloader.load_image(img_np)
 
@@ -141,6 +152,7 @@ class SA_SuperResolution:
             self.scale,
         )
 
+        # Crop to original size * scale
         output_img = output_img[
             :, : original_shape[0] * self.scale, : original_shape[1] * self.scale
         ]
