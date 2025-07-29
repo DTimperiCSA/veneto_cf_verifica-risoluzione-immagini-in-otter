@@ -1,42 +1,39 @@
-import threading
+import os
+
 from pathlib import Path
 
-from src.utils import *
-from src.paths import *
-from src.config import *
-from src.image_processing import *
+from src.processing import apply_super_resolution_single, apply_personalized_downscaling_single
 from logs.logger import CSVLogger
 
-class ImageWorker(threading.Thread):
-    def __init__(self, image_path: Path, sr_output_dir: Path, ds_output_dir: Path, logger: CSVLogger):
-        super().__init__()
-        self.image_path = image_path
-        self.sr_output_dir = sr_output_dir
-        self.ds_output_dir = ds_output_dir
+class ImageWorker:
+    def __init__(self, logger: CSVLogger, output_sr_dir: Path, output_final_dir: Path):
         self.logger = logger
+        self.output_sr_dir = output_sr_dir
+        self.output_final_dir = output_final_dir
 
-    def run(self):
+    def run(self, image_path: Path):
+        filename = image_path.name
+
+        # Skip if already completed
+        if self.logger.is_success(filename, "completed"):
+            return
+
         try:
-            final_output_path = self.ds_output_dir / self.image_path.name
-
-            # Skip se output finale esiste
-            if final_output_path.exists():
-                print(f"Skipping {self.image_path.name}, output already exists.")
-                return
-
-            # Step 1: Super resolution
+            # Step 1: Super-resolution
             try:
-                sr_image_path = apply_super_resolution_single(self.image_path, self.sr_output_dir)
+                output_sr_path = apply_super_resolution_single(image_path, self.output_sr_dir)
+                self.logger.log(filename, "super_resolution", success=True)
             except Exception as e:
-                self.logger.log_failure(self.image_path.name, "super_resolution", str(e))
+                self.logger.log(filename, "super_resolution", success=False, error=str(e))
                 return
 
             # Step 2: Downscaling
             try:
-                ds_image_path = apply_personalized_downscaling_single(sr_image_path, self.ds_output_dir)
+                output_final_path = apply_personalized_downscaling_single(output_sr_path, self.output_final_dir)
+                self.logger.log(filename, "downscale", success=True)
             except Exception as e:
-                self.logger.log_failure(self.image_path.name, "downscaling", str(e))
+                self.logger.log(filename, "downscale", success=False, error=str(e))
                 return
 
         except Exception as e:
-            self.logger.log_crash(f"Crash processing {self.image_path.name}: {e}")
+            self.logger.log_crash(f"Unexpected error with {filename}: {e}")
