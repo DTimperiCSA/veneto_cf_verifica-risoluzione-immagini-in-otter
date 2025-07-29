@@ -6,9 +6,9 @@ import numpy as np
 from pathlib import Path
 from PIL import Image
 
-from config import *
-from paths import *
-from utils import *
+from src.utils import *
+from src.paths import *
+from src.config import *
 from model.SR_Script.super_resolution import SA_SuperResolution
 
 model = SA_SuperResolution(
