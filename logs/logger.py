@@ -13,7 +13,7 @@ class CSVLogger:
 
         # mappa filename -> last error/failure info (una riga per immagine con errore)
         self.rows = {}
-        self.fieldnames = ["timestamp", "filename", "step", "status", "error"]
+        self.fieldnames = ["timestamp", "filename", "step", "status", "error", "full_path"]
 
         if self.csv_path.exists():
             self._load_existing()
@@ -26,11 +26,10 @@ class CSVLogger:
         with open(self.csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Carica solo righe con errore (status = false)
                 if row["status"] == "false":
                     self.rows[row["filename"]] = row
 
-    def log_failure(self, filename: str, step: str, error: str):
+    def log_failure(self, filename: str, step: str, error: str, full_path: str = ""):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         with self.lock:
             self.rows[filename] = {
@@ -39,9 +38,10 @@ class CSVLogger:
                 "step": step,
                 "status": "false",
                 "error": error,
+                "full_path": full_path,
             }
 
-    def log_crash(self, error: str):
+    def log_crash(self, error: str, full_path: str = ""):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         with self.lock:
             crash_id = f"CRASH_{timestamp}"
@@ -51,7 +51,25 @@ class CSVLogger:
                 "step": "CRASH",
                 "status": "false",
                 "error": error,
+                "full_path": full_path,
             }
+
+    def log(self, filename: str, step: str, success: bool, error: str = "", full_path: str = ""):
+        """
+        Metodo generico di logging.
+        - Se success=True, non fa nulla (perché vuoi salvare solo errori).
+        - Se success=False, registra un failure.
+        """
+        if success:
+            return
+        else:
+            self.log_failure(filename, step, error, full_path)
+
+    def print_status(self, total_images: int):
+        with self.lock:
+            failed = len(self.rows)
+            success = total_images - failed
+        print(f"[CSVLogger] Immagini processate con successo: {success}, immagini con errore: {failed}")
 
     def _autosave_loop(self):
         while self.running:
