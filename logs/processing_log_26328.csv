@@ -1,4 +1,0 @@
-timestamp,filename,step,status,error,full_path
-2025-07-30 12:11:08,immagine_a_600 (3).tif,validate_input,false,Input image invalid: File non trovato (path inesistente),
-2025-07-30 12:11:08,immagine_a_600 (4).tif,validate_input,false,Input image invalid: File non trovato (path inesistente),
-2025-07-30 12:11:08,immagine_a_600 (5).tif,validate_input,false,Input image invalid: File non trovato (path inesistente),
