@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from multiprocessing import Pool
@@ -15,8 +16,14 @@ from mutliprocess_and_multithread.config import *
 from logs.logger import CSVLogger
 from model.SR_Script.super_resolution import SA_SuperResolution
 
+
 def get_custom_output_dirs(device: str, processes: int, threads: int):
-    base_sr_dir, base_ds_dir = BENCHMARK_IMAGES_DIR
+    base_sr_dir = BENCHMARK_IMAGES_DIR
+    base_ds_dir = BENCHMARK_IMAGES_DIR
+
+    os.makedirs(base_sr_dir, exist_ok=True)
+    os.makedirs(base_ds_dir, exist_ok=True)
+
     suffix = f"{device}_p{processes}_t{threads}"
 
     custom_sr_dir = base_sr_dir / f"{base_sr_dir.name}_{suffix}"
@@ -26,6 +33,7 @@ def get_custom_output_dirs(device: str, processes: int, threads: int):
     custom_ds_dir.mkdir(parents=True, exist_ok=True)
 
     return custom_sr_dir, custom_ds_dir
+
 
 def create_sr_model(use_gpu: bool):
     try:
@@ -43,6 +51,7 @@ def create_sr_model(use_gpu: bool):
         with open("model_load_errors.log", "a") as f:
             f.write(f"Errore caricamento modello {'GPU' if use_gpu else 'CPU'}: {type(e).__name__}: {e}\n")
         raise
+
 
 def worker_process_batch(image_paths: list[str], super_resolution_dir: Path, downscaling_dir: Path, use_gpu: bool, num_threads: int) -> list[str]:
     from mutliprocess_and_multithread.worker import ImageWorker
@@ -65,6 +74,7 @@ def worker_process_batch(image_paths: list[str], super_resolution_dir: Path, dow
 
     logger.stop()
     return results
+
 
 def benchmark(devices=["gpu", "cpu"], process_list=[1, 2, 4, 8], thread_list=[1, 2, 3, 4, 8]):
     print("\n🧪 Avvio benchmark multiprocessing + multithreading...\n")
@@ -187,6 +197,14 @@ def benchmark(devices=["gpu", "cpu"], process_list=[1, 2, 4, 8], thread_list=[1,
     print(f"✅ Configurazione migliore salvata in {best_path.absolute()}")
     print(f"🏁 Migliore: {best_result}")
     print(f"🗂️  Tutti i risultati salvati in {all_results_path.absolute()}")
+
+    # ✅ Eliminazione finale della cartella benchmark/images
+    if BENCHMARK_IMAGES_DIR.exists():
+        print(f"🧹 Pulizia: elimino {BENCHMARK_IMAGES_DIR}")
+        shutil.rmtree(BENCHMARK_IMAGES_DIR)
+    else:
+        print("ℹ️  Nessuna cartella da eliminare.")
+
 
 if __name__ == "__main__":
     benchmark()
