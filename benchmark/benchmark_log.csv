@@ -1,2 +1,0 @@
-timestamp,device,processes,threads,total_time,avg_time_per_image,success,errors,images_count
-2025-07-30 12:50:58,gpu,1,1,208.57080388069153,20.857080388069154,10,0,10
