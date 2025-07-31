@@ -1,9 +1,14 @@
 import sys
 import time
-import torch
+import csv
+import json
+import argparse
 from pathlib import Path
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import Pool, set_start_method, Manager
+from functools import partial
+from more_itertools import chunked
 
 from src.utils import *
 from src.paths import *
@@ -11,17 +16,44 @@ from src.config import *
 from src.worker import ImageWorker
 from logs.logger import CSVLogger
 from model.SR_Script.super_resolution import SA_SuperResolution
+from benchmark.benchmark import benchmark
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
-MAX_WORKERS = 4  # Numero di thread concorrenti (adatta alla tua macchina)
 
-def main():
+# Modifica della funzione per aggiornare via queue
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue):
+    model = SA_SuperResolution(
+        models_dir=model_path,
+        model_scale=SUPER_RESOLUTION_PAR,
+        tile_size=128,
+        gpu_id=0,
+        verbosity=False,
+    )
+    logger = CSVLogger(logger_path)
+    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model)
 
-    print("caricamento del modello...")
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(worker.run, img): img for img in images}
+
+        for future in as_completed(futures):
+            img = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
+            finally:
+                progress_queue.put(1)  # segnala un'immagine completata
+
+    logger.stop()
+
+
+def run_standard_processing(processes=1, threads=4):
+    
+    print("🔍 Verifica iniziale: caricamento del modello di super-risoluzione...")
 
     try:
-        model = SA_SuperResolution(
+        _ = SA_SuperResolution(
             models_dir=SR_SCRIPT_MODEL_DIR,
             model_scale=SUPER_RESOLUTION_PAR,
             tile_size=128,
@@ -30,56 +62,101 @@ def main():
         )
     except Exception as e:
         raise RuntimeError(f"Errore durante il caricamento del modello di super-risoluzione: {e}")
-    print("🚀 Avvio del processo di elaborazione immagini...\n")
+
+    print("🚀 Avvio del processo multi-processo e multi-thread...")
 
     super_resolution_dir, downscaling_dir = find_output_dir()
-    logger = CSVLogger(CSV_LOG_PATH)
-    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir)
-
     input_images = count_all_images(INPUT_IMAGES_DIR)
+
     if not input_images:
         print("⚠️ Nessuna immagine trovata nella cartella di input. Uscita.")
         return
 
-    # Filtra le immagini non ancora elaborate
-    images_to_process = [
-        img for img in input_images if not (downscaling_dir / img.name).exists()
-    ]
+    images_to_process = []
+    for img in input_images:
+        relative = img.relative_to(INPUT_IMAGES_DIR)
+        subdir = relative.parts[0] if len(relative.parts) > 1 else ""
+        final_output = downscaling_dir / subdir / img.name
+        if not final_output.exists():
+            images_to_process.append(img)
 
     print(f"📦 Totale immagini trovate:        {len(input_images)}")
-    print(f"✅ Immagini già elaborate:        {len(input_images) - len(images_to_process)}")
-    print(f"🕐 Immagini da elaborare ora:     {len(images_to_process)}\n")
+    print(f"✅ Immagini già elaborate:         {len(input_images) - len(images_to_process)}")
+    print(f"🕐 Immagini da elaborare ora:      {len(images_to_process)}")
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(worker.run, img): img for img in images_to_process}
+    chunks = list(chunked(images_to_process, max(1, len(images_to_process) // processes)))
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="🔍 Elaborazione immagini"):
-            img = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
+    manager = Manager()
+    progress_queue = manager.Queue()
 
-    logger.stop()
-    logger.print_status(input_images)
+    target = partial(
+        process_batch,
+        threads=threads,
+        super_resolution_dir=super_resolution_dir,
+        downscaling_dir=downscaling_dir,
+        model_path=SR_SCRIPT_MODEL_DIR,
+        logger_path=CSV_LOG_PATH,
+        progress_queue=progress_queue,
+    )
 
-    success_count = len(input_images) - len(logger.rows)
-    error_count = len(logger.rows)
+    try:
+        set_start_method("spawn", force=True)
+        with Pool(processes) as pool:
+            result = pool.map_async(target, chunks)
+
+            with tqdm(total=len(images_to_process), desc="📷 Immagini elaborate") as pbar:
+                completed = 0
+                while completed < len(images_to_process):
+                    try:
+                        progress_queue.get(timeout=0.5)
+                        completed += 1
+                        pbar.update(1)
+                    except:
+                        if result.ready():
+                            break
+                result.wait()
+    except KeyboardInterrupt:
+        print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
+        sys.exit(0)
+
+    # Log finale
+    error_count = 0
+    if CSV_LOG_PATH.exists():
+        with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            error_count = sum(1 for row in reader if row["status"] == "false")
+
+    success_count = len(input_images) - error_count
+
     print("\n📊 Risultato finale:")
     print(f"✅ Immagini processate con successo: {success_count}")
     print(f"❌ Immagini con errore:              {error_count}")
 
-if __name__ == "__main__":
-    if torch.cuda.is_available():
-        print("✅ GPU disponibile e usata:", torch.cuda.get_device_name(0))
-    else:
-        print("⚠️ GPU non disponibile, si usa CPU")
+def main():
+    parser = argparse.ArgumentParser(description="Processa immagini o esegui benchmark.")
+    parser.add_argument("--benchmark", action="store_true", help="Esegui benchmark multiprocesso e multithread")
+    args = parser.parse_args()
+
+    if args.benchmark:
+        benchmark()
+        return
+
+    if not JSON_BENCHMARK_BEST_CONFIG_PATH.exists():
+        print("⚠️ Nessuna configurazione ottimale trovata. Eseguo benchmark...")
+        benchmark()
+
+    with JSON_BENCHMARK_BEST_CONFIG_PATH.open("r", encoding="utf-8") as f:
+        best_config = json.load(f)
+
+    processes = int(best_config["processes"])
+    threads = int(best_config["threads"])
+    print(f"\n📌 Uso della configurazione ottimale: {processes} processi, {threads} thread")
 
     try:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
-                main()
+                run_standard_processing(processes, threads)
                 print("✅ Elaborazione completata con successo.")
                 break
             except KeyboardInterrupt:
@@ -96,3 +173,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
         sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -24,10 +24,9 @@ class CSVLogger:
         self._init_csv_file()
 
     def _init_csv_file(self):
-        if not self.csv_path.exists() or self.csv_path.stat().st_size == 0:
-            with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-                writer.writeheader()
+        with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
+            writer.writeheader()
 
     def log_failure(self, filename: str, step: str, error: str, full_path: str = ""):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")

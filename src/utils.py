@@ -1,5 +1,5 @@
 import os
-
+import traceback
 import numpy as np
 
 from PIL import Image
@@ -57,11 +57,6 @@ def count_all_images(directory: Path) -> list[Path]:
             full_path = current_dir / filename
             all_images.append(full_path)
     return all_images
-
-from PIL import Image
-from pathlib import Path
-from typing import Tuple
-import traceback
 
 def is_valid_image_file(file_path: Path) -> Tuple[bool, str]:
     """

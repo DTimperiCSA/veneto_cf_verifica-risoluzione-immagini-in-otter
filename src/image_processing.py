@@ -4,9 +4,9 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 
-from mutliprocess_and_multithread.utils import *
-from mutliprocess_and_multithread.paths import *
-from mutliprocess_and_multithread.config import *
+from src.utils import *
+from src.paths import *
+from src.config import *
 from model.SR_Script.super_resolution import SA_SuperResolution
 
 
@@ -47,7 +47,7 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path, sr_model: 
         output_img.save(output_path)
     except Exception as e:
         raise RuntimeError(f"Failed to save super-resolved image to {output_path}: {e}")
-
+    
     return output_path
 
 
@@ -66,10 +66,11 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         ValueError: If PPI is invalid or unsupported.
         RuntimeError: If image loading or saving fails.
     """
-    name = image_path.stem
-    if "400" in name:
+    ppi_folder = image_path.parent.name
+
+    if "400" in ppi_folder:
         requested_PPI = 400
-    elif "600" in name:
+    elif "600" in ppi_folder:
         requested_PPI = 600
     else:
         raise ValueError(f"Unsupported or missing PPI value in filename: {image_path.name}")
@@ -98,5 +99,7 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         resized_img.save(output_path, dpi=(requested_PPI, requested_PPI))
     except Exception as e:
         raise RuntimeError(f"Failed to save resized image to {output_path}: {e}")
-
+    
     return output_path
+
+
