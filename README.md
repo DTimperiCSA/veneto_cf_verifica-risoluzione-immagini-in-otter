@@ -80,31 +80,127 @@ pdm run python -m src.main
 
 ```
 veneto_cf_verifica-risoluzione-immagini-in-otter/
+│   .gitignore
+│   .pdm-python
+│   pdm.lock
+│   pyproject.toml
+│   README.md
 │
-├── images/
-│   ├── input/               # immagini da elaborare
-│   └── output/
-│       ├── sr_x2/           # immagini super-risolute
-│       └── downscaling/     # immagini finali dopo il downscaling
+├───benchmark
+│   │   benchmark.py
+│   │   benchmark_log.csv
+│   │   benchmark_results.json
+│   │
+│   └───__pycache__
+│           benchmark.cpython-313.pyc
 │
-├── logs/
-│   ├── failures.csv         # log delle immagini fallite
-│   ├── benchmark_results.csv
-│   └── best_config.json     # configurazione ottimale trovata
+├───images
+│   ├───input
+│   │   ├───400_PPI
+│   │   │       file.svg
+│   │   │       immagine_a_400 - Copia (2).tif
+│   │   │       immagine_a_400 - Copia (3).tif
+│   │   │       immagine_a_400 - Copia (4).tif
+│   │   │       immagine_a_400 - Copia.tif
+│   │   │       immagine_a_400.tif
+│   │   │
+│   │   └───600_PPI
+│   │           immagine_a_600 - Copia (2).tif
+│   │           immagine_a_600 - Copia (3).tif
+│   │           immagine_a_600 - Copia (4).tif
+│   │           immagine_a_600 - Copia.svg
+│   │           immagine_a_600.tif
+│   │           sample-50-MB-pdf-file.pdf
+│   │
+│   ├───original
+│   │       immagine_a_400.tif
+│   │       immagine_a_600.tif
+│   │
+│   └───output
+│       ├───downscaled_x2
+│       │   ├───400_PPI
+│       │   └───600_PPI
+│       └───sr_x2
+│           ├───400_PPI
+│           └───600_PPI
+├───logs
+│   │   logger.py
+│   │   processing_log.csv
+│   │   processing_log_benchmark.csv
+│   │   test_log.csv
+│   │
+│   └───__pycache__
+│           logger.cpython-313.pyc
 │
-├── model/
-│   └── SR_Script/           # modello super-resolution
+├───metadata
+│       metadati_immagine_a_400.json
+│       metadati_immagine_a_600.json
 │
-├── src/
-│   ├── main.py              # entrypoint principale
-│   ├── benchmark.py         # script di benchmark
-│   ├── processing.py        # logica di super-risoluzione e downscaling
-│   ├── worker.py            # classe ImageWorker
-│   ├── utils.py             # utility varie
-│   ├── config.py            # configurazioni (PPI, scale, parametri)
-│   └── paths.py             # gestione percorsi
+├───model
+│   └───SR_Script
+│       │   .gitignore
+│       │   pdm.lock
+│       │   process_sr.py
+│       │   pyproject.toml
+│       │   README.md
+│       │   requirements.txt
+│       │   super_resolution.py
+│       │   tiling_image_loader.py
+│       │
+│       ├───input
+│       │       00001 copy.png
+│       │       00001.png
+│       │
+│       ├───output
+│       │       00001 copy_x2.png
+│       │       00001_x2.png
+│       │
+│       ├───src
+│       │   └───sr_script
+│       │           __init__.py
+│       │
+│       ├───super_res
+│       │       edsr_2x.ven
+│       │       edsr_3x.ven
+│       │       edsr_4x.ven
+│       │
+│       ├───tests
+│       │       __init__.py
+│       │
+│       └───__pycache__
+│               super_resolution.cpython-313.pyc
+│               super_resolution.cpython-39.pyc
+│               tiling_image_loader.cpython-313.pyc
 │
-└── pyproject.toml           # definizioni PDM
+├───src
+│   │   config.py
+│   │   image_processing.py
+│   │   main.py
+│   │   metadata_manager.py
+│   │   paths.py
+│   │   utils.py
+│   │   worker.py
+│   │   __init__.py
+│   │
+│   └───__pycache__
+│           config.cpython-313.pyc
+│           image_processing.cpython-313.pyc
+│           main.cpython-313.pyc
+│           paths.cpython-313.pyc
+│           test.cpython-313.pyc
+│           utils.cpython-313.pyc
+│           worker.cpython-313.pyc
+│           __init__.cpython-313.pyc
+│
+└───tests
+    │   test_benchmark_thread.py
+    │   test_downscaling.py
+    │   test_run_csv_logger.py
+    │   test_super_resolution_x2.py
+    │
+    └───__pycache__
+            test_benchmark_thread.cpython-313.pyc
+            test_run_csv_logger.cpython-313.pyc
 ```
 
 ---
