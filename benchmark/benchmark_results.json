@@ -1,5 +1,5 @@
 {
     "device": "GPU",
-    "processes": 1,
-    "threads": 2
+    "processes": 4,
+    "threads": 4
 }

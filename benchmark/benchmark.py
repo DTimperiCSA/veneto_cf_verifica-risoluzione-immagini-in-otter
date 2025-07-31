@@ -80,7 +80,7 @@ def benchmark():
 
     for device in devices:
         if device == "CPU" and cpu_exceeded:
-            print("🚫 CPU già troppo lenta, skippo ulteriori test su CPU.")
+            print("🚫 CPU già troppo lenta, skippo ulteriori test su CPU.\n")
             continue
 
         use_gpu = device == "GPU"
@@ -88,14 +88,14 @@ def benchmark():
         for processes in [1, 2, 4, 8]:
             for threads in [1, 2, 4, 8]:
                 if (device, processes, threads) in completed:
-                    print(f"⏭️  Combinazione già testata: {device}, {processes} processi, {threads} thread")
+                    print(f"⏭️  Combinazione già testata: {device}, {processes} processi, {threads} thread\n")
                     continue
 
                 if device == "CPU" and cpu_exceeded:
-                    print("🚫 CPU già troppo lenta, skippo ulteriori test su CPU.")
+                    print("🚫 CPU già troppo lenta, skip test con  {processes} processi, {threads} thread su CPU.\n")
                     continue
 
-                print(f"⚙️  Testando: {device}, {processes} processi, {threads} thread")
+                print(f"⚙️  Testando: {device}, {processes} processi, {threads} thread\n")
 
                 super_resolution_dir = BENCHMARK_IMAGES_DIR / f"SR_{device}_p{processes}_t{threads}"
                 downscaling_dir = BENCHMARK_IMAGES_DIR / f"DS_{device}_p{processes}_t{threads}"
@@ -130,7 +130,7 @@ def benchmark():
                 # Stop further CPU tests if too slow
                 if device == "CPU" and avg_time > 60:
                     cpu_exceeded = True
-                    print("⚠️  Tempo medio per immagine con CPU superiore a 60s. Interrompo test CPU.")
+                    print("⚠️  Tempo medio per immagine con CPU superiore a 60s. Interrompo test CPU.\n")
                     break
 
                 if avg_time < best_avg_time:
