@@ -66,6 +66,8 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         ValueError: If PPI is invalid or unsupported.
         RuntimeError: If image loading or saving fails.
     """
+
+    # CAMBIARE IN BASE A SE L'IMMAGINE E' MINORE O UGUALE AD A4 ALLORA 400 PPI ALTRIMENTI 600 PPI
     ppi_folder = image_path.parent.name
 
     if "400" in ppi_folder:
