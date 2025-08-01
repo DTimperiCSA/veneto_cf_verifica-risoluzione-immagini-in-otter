@@ -82,12 +82,17 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         chromatic_ruler = CROMATIC_SCALE_RULER_600_PPI
         target_ruler_px = TARGET_RULER_PX_600_PPI
 
-    original_ruler_px = SUPER_RESOLUTION_PAR * chromatic_ruler["width_pixel"]
+    original_ruler_inch = chromatic_ruler["width_mm"] / INCH_CONVERSION
+    original_ruler_px = SUPER_RESOLUTION_PAR * chromatic_ruler["ppi"] * original_ruler_inch
+
     scale_factor = target_ruler_px / original_ruler_px
+    scale_factor *= chromatic_ruler["correction_factor"]
 
     try:
         with Image.open(image_path) as image:
-            new_size = (int(image.width * scale_factor), int(image.height * scale_factor))
+            new_width = int(image.width * scale_factor)
+            new_height = int(image.height * scale_factor)
+            new_size = (new_width, new_height)
             resized_img = image.resize(new_size, resample=Image.LANCZOS)
     except Exception as e:
         raise RuntimeError(f"Failed to load or resize image {image_path}: {e}")
@@ -101,5 +106,3 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         raise RuntimeError(f"Failed to save resized image to {output_path}: {e}")
     
     return output_path
-
-
