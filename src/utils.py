@@ -1,6 +1,7 @@
 import os
 import traceback
 import numpy as np
+import csv
 
 from PIL import Image
 from pathlib import Path
@@ -8,6 +9,19 @@ from typing import Tuple
 
 from src.paths import *
 from src.config import *
+
+def resort_csv_log():
+    with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    # Ordina per timestamp, poi per filename
+    rows_sorted = sorted(rows, key=lambda row: (row["timestamp"], row["filename"]))
+
+    with open(CSV_LOG_PATH, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=reader.fieldnames)
+        writer.writeheader()
+        writer.writerows(rows_sorted)
 
 def numpy_to_image(array: np.ndarray) -> Image.Image:
     """

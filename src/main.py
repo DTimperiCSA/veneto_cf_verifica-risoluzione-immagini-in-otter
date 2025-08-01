@@ -3,11 +3,14 @@ import time
 import csv
 import json
 import argparse
+
 from pathlib import Path
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import Pool, set_start_method, Manager
 from functools import partial
+from more_itertools import chunked
+from math import ceil
 
 from src.utils import *
 from src.paths import *
@@ -20,21 +23,8 @@ from benchmark.benchmark import benchmark
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
 
-
-def chunk_images(images, n_chunks):
-    avg = len(images) / float(n_chunks)
-    chunks = []
-    last = 0.0
-    while last < len(images):
-        chunk = images[int(last):int(last + avg)]
-        if chunk:
-            chunks.append(chunk)
-        last += avg
-    return chunks
-
-
+# Modifica della funzione per aggiornare via queue
 def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue):
-    print(f"Process_batch: elaboro {len(images)} immagini")
     model = SA_SuperResolution(
         models_dir=model_path,
         model_scale=SUPER_RESOLUTION_PAR,
@@ -42,7 +32,6 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         gpu_id=0,
         verbosity=False,
     )
-
     logger = CSVLogger(logger_path)
     worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model)
 
@@ -54,12 +43,11 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
             try:
                 future.result()
             except Exception as e:
-                logger.log(img, "run", success=False, error=f"Thread error: {e}")
+                logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
             finally:
                 progress_queue.put(1)  # segnala un'immagine completata
 
     logger.stop()
-
 
 def run_standard_processing(processes, threads):
     print("🔍 Caricamento modello di super-risoluzione (test iniziale)...")
@@ -99,19 +87,17 @@ def run_standard_processing(processes, threads):
         print("✅ Tutte le immagini risultano già elaborate.")
         return
 
+    manager = Manager()
+    progress_queue = manager.Queue()
+
     total_success = 0
     total_error = 0
 
     for folder, images in folder_to_images.items():
-        print(f"\n➡️  Cartella: {folder} ({len(images)} immagini da processare)")
+        print(f"\n📂 Cartella: {folder} ({len(images)} immagini da processare)")
 
-        chunks = chunk_images(images, processes)
-        print(f"DEBUG: {len(images)} immagini suddivise in {len(chunks)} chunk")
-        for i, chunk in enumerate(chunks):
-            print(f"DEBUG: chunk {i} contiene {len(chunk)} immagini")
-
-        manager = Manager()
-        progress_queue = manager.Queue()
+        chunk_size = ceil(len(images) / processes)
+        chunks = list(chunked(images, chunk_size))
 
         target = partial(
             process_batch,
@@ -128,21 +114,27 @@ def run_standard_processing(processes, threads):
             with Pool(processes) as pool:
                 result = pool.map_async(target, chunks)
 
+                completed = 0
                 with tqdm(total=len(images), desc="📷 Immagini elaborate", ncols=80) as pbar:
-                    completed = 0
                     while completed < len(images):
                         try:
-                            progress_queue.get(timeout=0.5)
+                            progress_queue.get(timeout=1)
                             completed += 1
                             pbar.update(1)
                         except:
                             if result.ready():
+                                while not progress_queue.empty():
+                                    progress_queue.get_nowait()
+                                    completed += 1
+                                    pbar.update(1)
                                 break
-                    result.wait()
+                            continue
+                result.wait()
         except KeyboardInterrupt:
             print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
             sys.exit(0)
 
+        # Conta successi e fallimenti per questa cartella
         folder_error_count = 0
         if CSV_LOG_PATH.exists():
             with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
@@ -161,6 +153,8 @@ def run_standard_processing(processes, threads):
     print("\n📊 Risultato finale:")
     print(f"✅ Immagini processate con successo: {total_success}")
     print(f"❌ Immagini con errore:              {total_error}")
+
+    resort_csv_log()
 
 
 def main():
@@ -186,8 +180,8 @@ def main():
     try:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if CSV_LOG_PATH.exists():
+                print(f"\n📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
                 CSV_LOG_PATH.unlink()
-
             try:
                 print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
                 run_standard_processing(processes, threads)
