@@ -8,7 +8,6 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import Pool, set_start_method, Manager
 from functools import partial
-from more_itertools import chunked
 
 from src.utils import *
 from src.paths import *
@@ -21,8 +20,21 @@ from benchmark.benchmark import benchmark
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
 
-# Modifica della funzione per aggiornare via queue
+
+def chunk_images(images, n_chunks):
+    avg = len(images) / float(n_chunks)
+    chunks = []
+    last = 0.0
+    while last < len(images):
+        chunk = images[int(last):int(last + avg)]
+        if chunk:
+            chunks.append(chunk)
+        last += avg
+    return chunks
+
+
 def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue):
+    print(f"Process_batch: elaboro {len(images)} immagini")
     model = SA_SuperResolution(
         models_dir=model_path,
         model_scale=SUPER_RESOLUTION_PAR,
@@ -30,6 +42,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         gpu_id=0,
         verbosity=False,
     )
+
     logger = CSVLogger(logger_path)
     worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model)
 
@@ -41,17 +54,15 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
             try:
                 future.result()
             except Exception as e:
-                logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
+                logger.log(img, "run", success=False, error=f"Thread error: {e}")
             finally:
                 progress_queue.put(1)  # segnala un'immagine completata
 
     logger.stop()
 
 
-def run_standard_processing(processes=1, threads=4):
-    
-    print("🔍 Verifica iniziale: caricamento del modello di super-risoluzione...")
-
+def run_standard_processing(processes, threads):
+    print("🔍 Caricamento modello di super-risoluzione (test iniziale)...")
     try:
         _ = SA_SuperResolution(
             models_dir=SR_SCRIPT_MODEL_DIR,
@@ -61,76 +72,96 @@ def run_standard_processing(processes=1, threads=4):
             verbosity=True,
         )
     except Exception as e:
-        raise RuntimeError(f"Errore durante il caricamento del modello di super-risoluzione: {e}")
+        raise RuntimeError(f"Errore nel caricamento modello SR: {e}")
 
-    print("🚀 Avvio del processo multi-processo e multi-thread...")
+    print("\n📂 Scansione cartelle da elaborare...")
 
     super_resolution_dir, downscaling_dir = find_output_dir()
-    input_images = count_all_images(INPUT_IMAGES_DIR)
+    folders = [f for f in INPUT_IMAGES_DIR.rglob("*") if f.is_dir()]
+    folder_to_images = {}
 
-    if not input_images:
-        print("⚠️ Nessuna immagine trovata nella cartella di input. Uscita.")
+    for folder in folders:
+        images = [
+            img for img in folder.glob("*")
+            if is_valid_image_file(img)
+        ]
+        images_to_process = []
+        for img in images:
+            rel = img.relative_to(INPUT_IMAGES_DIR)
+            subdir = rel.parent
+            out_path = downscaling_dir / subdir / img.name
+            if not out_path.exists():
+                images_to_process.append(img)
+        if images_to_process:
+            folder_to_images[folder] = images_to_process
+
+    if not folder_to_images:
+        print("✅ Tutte le immagini risultano già elaborate.")
         return
 
-    images_to_process = []
-    for img in input_images:
-        relative = img.relative_to(INPUT_IMAGES_DIR)
-        subdir = relative.parts[0] if len(relative.parts) > 1 else ""
-        final_output = downscaling_dir / subdir / img.name
-        if not final_output.exists():
-            images_to_process.append(img)
+    total_success = 0
+    total_error = 0
 
-    print(f"📦 Totale immagini trovate:        {len(input_images)}")
-    print(f"✅ Immagini già elaborate:         {len(input_images) - len(images_to_process)}")
-    print(f"🕐 Immagini da elaborare ora:      {len(images_to_process)}")
+    for folder, images in folder_to_images.items():
+        print(f"\n➡️  Cartella: {folder} ({len(images)} immagini da processare)")
 
-    chunks = list(chunked(images_to_process, max(1, len(images_to_process) // processes)))
+        chunks = chunk_images(images, processes)
+        print(f"DEBUG: {len(images)} immagini suddivise in {len(chunks)} chunk")
+        for i, chunk in enumerate(chunks):
+            print(f"DEBUG: chunk {i} contiene {len(chunk)} immagini")
 
-    manager = Manager()
-    progress_queue = manager.Queue()
+        manager = Manager()
+        progress_queue = manager.Queue()
 
-    target = partial(
-        process_batch,
-        threads=threads,
-        super_resolution_dir=super_resolution_dir,
-        downscaling_dir=downscaling_dir,
-        model_path=SR_SCRIPT_MODEL_DIR,
-        logger_path=CSV_LOG_PATH,
-        progress_queue=progress_queue,
-    )
+        target = partial(
+            process_batch,
+            threads=threads,
+            super_resolution_dir=super_resolution_dir,
+            downscaling_dir=downscaling_dir,
+            model_path=SR_SCRIPT_MODEL_DIR,
+            logger_path=CSV_LOG_PATH,
+            progress_queue=progress_queue,
+        )
 
-    try:
-        set_start_method("spawn", force=True)
-        with Pool(processes) as pool:
-            result = pool.map_async(target, chunks)
+        try:
+            set_start_method("spawn", force=True)
+            with Pool(processes) as pool:
+                result = pool.map_async(target, chunks)
 
-            with tqdm(total=len(images_to_process), desc="📷 Immagini elaborate") as pbar:
-                completed = 0
-                while completed < len(images_to_process):
-                    try:
-                        progress_queue.get(timeout=0.5)
-                        completed += 1
-                        pbar.update(1)
-                    except:
-                        if result.ready():
-                            break
-                result.wait()
-    except KeyboardInterrupt:
-        print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
-        sys.exit(0)
+                with tqdm(total=len(images), desc="📷 Immagini elaborate", ncols=80) as pbar:
+                    completed = 0
+                    while completed < len(images):
+                        try:
+                            progress_queue.get(timeout=0.5)
+                            completed += 1
+                            pbar.update(1)
+                        except:
+                            if result.ready():
+                                break
+                    result.wait()
+        except KeyboardInterrupt:
+            print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
+            sys.exit(0)
 
-    # Log finale
-    error_count = 0
-    if CSV_LOG_PATH.exists():
-        with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            error_count = sum(1 for row in reader if row["status"] == "false")
+        folder_error_count = 0
+        if CSV_LOG_PATH.exists():
+            with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                folder_error_count = sum(
+                    1 for row in reader
+                    if row["status"] == "false" and Path(row["filename"]).parent.name == folder.name
+                )
 
-    success_count = len(input_images) - error_count
+        folder_success = len(images) - folder_error_count
+        total_success += folder_success
+        total_error += folder_error_count
+
+        print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}")
 
     print("\n📊 Risultato finale:")
-    print(f"✅ Immagini processate con successo: {success_count}")
-    print(f"❌ Immagini con errore:              {error_count}")
+    print(f"✅ Immagini processate con successo: {total_success}")
+    print(f"❌ Immagini con errore:              {total_error}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Processa immagini o esegui benchmark.")
@@ -154,6 +185,9 @@ def main():
 
     try:
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            if CSV_LOG_PATH.exists():
+                CSV_LOG_PATH.unlink()
+
             try:
                 print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
                 run_standard_processing(processes, threads)

@@ -32,3 +32,6 @@ CROMATIC_SCALE_RULER_600_PPI = {
     "height_mm": 37.3,
     "correction_factor": 600 / 586
 }
+
+# A4 AREA
+A4_AREA_MM = 210 * 297  # mm^2

@@ -13,50 +13,51 @@ class ImageWorker:
         self.sr_model = sr_model
 
     def run(self, image_path: Path):
-        filename = image_path.name
-        top_folder = image_path.parent.name  # 'A' or 'B'
-
         try:
-            sr_output_subdir = self.output_sr_dir / top_folder
-            final_output_subdir = self.output_final_dir / top_folder
+            filename = image_path.name
+            top_folder = image_path.parent.name
 
-            sr_output_path = sr_output_subdir / filename
-            final_output_path = final_output_subdir / filename
+            sr_output_dir = self.output_sr_dir / top_folder
+            downscale_output_dir = self.output_final_dir / top_folder
+
+            sr_output_path = sr_output_dir / filename
+            final_output_path = downscale_output_dir / filename
 
             if final_output_path.exists():
-                return
+                return  # Già elaborata
 
+            # 1. Validazione immagine input
             valid, err = is_valid_image_file(image_path)
             if not valid:
-                self.logger.log(filename, "validate_input", success=False, error=f"Input image invalid: {err}")
+                self.logger.log(image_path, "validate_input", success=False, error=f"Input image invalid: {err}")
                 return
-            
+
+            # 2. Super-Risoluzione (se non già fatta)
             if not sr_output_path.exists():
                 try:
-                    output_sr_path = apply_super_resolution_single(image_path, sr_output_subdir, self.sr_model)
+                    sr_output_path = apply_super_resolution_single(image_path, sr_output_dir, self.sr_model)
                 except Exception as e:
-                    self.logger.log(filename, "super_resolution", success=False, error=f"Errore super_resolution: {e}")
+                    self.logger.log(image_path, "super_resolution", success=False, error=f"Errore super_resolution: {e}")
                     return
-            else:
-                output_sr_path = sr_output_path
 
-            valid_sr, err_sr = is_valid_image_file(output_sr_path)
+            # 3. Validazione SR
+            valid_sr, err_sr = is_valid_image_file(sr_output_path)
             if not valid_sr:
-                self.logger.log(filename, "validate_super_resolution", success=False, error=f"Super-resolved image invalid: {err_sr}")
+                self.logger.log(image_path, "validate_super_resolution", success=False, error=f"Super-resolved image invalid: {err_sr}")
                 return
-            self.logger.log(filename, "super_resolution", success=True)
 
+            # 4. Downscaling personalizzato
             try:
-                output_final_path = apply_personalized_downscaling_single(output_sr_path, final_output_subdir)
+                final_output_path = apply_personalized_downscaling_single(sr_output_path, downscale_output_dir)
             except Exception as e:
-                self.logger.log(filename, "downscale", success=False, error=f"Errore downscale: {e}")
+                self.logger.log(image_path, "downscale", success=False, error=f"Errore downscale: {e}")
                 return
 
-            valid_ds, err_ds = is_valid_image_file(output_final_path)
+            # 5. Validazione downscale
+            valid_ds, err_ds = is_valid_image_file(final_output_path)
             if not valid_ds:
-                self.logger.log(filename, "validate_downscale", success=False, error=f"Downscaled image invalid: {err_ds}")
+                self.logger.log(image_path, "validate_downscale", success=False, error=f"Downscaled image invalid: {err_ds}")
                 return
-            self.logger.log(filename, "downscale", success=True)
 
         except Exception as e:
-            self.logger.log_crash(f"Unexpected error with {filename}: {e}")
+            self.logger.log_crash(error=f"Unexpected error with {image_path}: {e}", context_path=image_path)

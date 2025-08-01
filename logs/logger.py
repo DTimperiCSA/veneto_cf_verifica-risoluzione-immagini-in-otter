@@ -3,11 +3,23 @@ import threading
 import multiprocessing
 from pathlib import Path
 from datetime import datetime
+from typing import Union
+
 
 class CSVLogger:
-    def __init__(self, csv_path: str):
+    def __init__(self, csv_path: Union[str, Path], reset: bool = True):
         self.csv_path = Path(csv_path)
         self.fieldnames = ["timestamp", "filename", "step", "status", "error", "full_path"]
+
+        # Se voglio resettare il file (nuova run), lo elimino all'inizio
+        if reset and self.csv_path.exists():
+            self.csv_path.unlink()
+
+        # Creo il file e scrivo header solo se non esiste (oppure è stato appena eliminato)
+        if not self.csv_path.exists():
+            with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
+                writer.writeheader()
 
         # Queue multiprocessing-safe
         self.queue = multiprocessing.Queue()
@@ -20,19 +32,11 @@ class CSVLogger:
         self.writer_thread = threading.Thread(target=self._writer_loop, daemon=True)
         self.writer_thread.start()
 
-        # File aperto in modalità append, si scrive header se file nuovo
-        self._init_csv_file()
-
-    def _init_csv_file(self):
-        with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-            writer.writeheader()
-
     def log_failure(self, filename: str, step: str, error: str, full_path: str = ""):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         entry = {
             "timestamp": timestamp,
-            "filename": filename,
+            "filename": str(filename),
             "step": step,
             "status": "false",
             "error": error,
@@ -52,9 +56,9 @@ class CSVLogger:
         }
         self.queue.put(entry)
 
-    def log(self, filename: str, step: str, success: bool, error: str = "", full_path: str = ""):
+    def log(self, file_path: Union[str, Path], step: str, success: bool, error: str = "", full_path: str = ""):
         if not success:
-            self.log_failure(filename, step, error, full_path)
+            self.log_failure(file_path, step, error, full_path)
 
     def _writer_loop(self):
         with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
@@ -65,7 +69,6 @@ class CSVLogger:
                     writer.writerow(entry)
                     f.flush()
                 except Exception:
-                    # Timeout o queue vuota: passa
                     pass
 
     def stop(self):

@@ -1,3 +1,4 @@
 timestamp,filename,step,status,error,full_path
-2025-07-31 15:07:55,sample-50-MB-pdf-file.pdf,validate_input,false,Input image invalid: [OPEN FAIL] Errore in Image.open(): cannot identify image file 'C:\\Users\\andre\\Desktop\\veneto_cf_verifica-risoluzione-immagini-in-otter\\images\\input\\600_PPI\\sample-50-MB-pdf-file.pdf',
-2025-07-31 15:10:02,immagine_a_600 - Copia.svg,super_resolution,false,Errore super_resolution: Failed to save super-resolved image to C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\images\output\sr_x2\600_PPI\immagine_a_600 - Copia.svg: unknown file extension: .svg,
+2025-08-01 10:57:10,C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\images\input\B002.002\0003.tif,downscale,false,Errore downscale: Unsupported or missing PPI value in filename: 0003.tif,
+2025-08-01 10:57:10,C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\images\input\B002.002\0004.tif,downscale,false,Errore downscale: Unsupported or missing PPI value in filename: 0004.tif,
+2025-08-01 10:57:10,C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\images\input\B002.002\0005.tif,downscale,false,Errore downscale: Unsupported or missing PPI value in filename: 0005.tif,
