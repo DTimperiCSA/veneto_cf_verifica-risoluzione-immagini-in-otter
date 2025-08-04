@@ -157,7 +157,7 @@ def run_standard_processing(processes, threads):
 
     resort_csv_log()
 
-    shutil.rmtree(OUTPUT_TMP_DIR)
+    #shutil.rmtree(OUTPUT_TMP_DIR)
 
 
 def main():
