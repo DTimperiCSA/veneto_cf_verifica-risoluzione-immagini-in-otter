@@ -41,7 +41,7 @@ class CSVLogger:
         }
         self.queue.put(entry)
 
-    def log_crash(self, error: str, full_path: str = ""):
+    def log_crash(self, error: str, full_path: Path = None):
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         entry = {
             "timestamp": timestamp,

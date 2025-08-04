@@ -51,7 +51,7 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path, sr_model: 
     return output_path
 
 
-def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) -> Path:
+def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, ppi = int) -> Path:
     """
     Resize a super-resolved image based on PPI info in filename.
 
@@ -67,21 +67,11 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
         RuntimeError: If image loading or saving fails.
     """
 
-    # CAMBIARE IN BASE A SE L'IMMAGINE E' MINORE O UGUALE AD A4 ALLORA 400 PPI ALTRIMENTI 600 PPI
-    ppi_folder = image_path.parent.name
-
-    if "400" in ppi_folder:
-        requested_PPI = 400
-    elif "600" in ppi_folder:
-        requested_PPI = 600
-    else:
-        raise ValueError(f"Unsupported or missing PPI value in filename: {image_path.name}")
-
-    if requested_PPI == 400:
-        chromatic_ruler = CROMATIC_SCALE_RULER_400_PPI
+    if ppi == 400:
+        chromatic_ruler = CHROMATIC_BAND_400_PPI
         target_ruler_px = TARGET_RULER_PX_400_PPI
-    elif requested_PPI == 600:
-        chromatic_ruler = CROMATIC_SCALE_RULER_600_PPI
+    elif ppi == 600:
+        chromatic_ruler = CHROMATIC_BAND_600_PPI
         target_ruler_px = TARGET_RULER_PX_600_PPI
 
     original_ruler_inch = chromatic_ruler["width_mm"] / INCH_CONVERSION
@@ -103,7 +93,7 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path) ->
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        resized_img.save(output_path, dpi=(requested_PPI, requested_PPI))
+        resized_img.save(output_path, dpi=(ppi, ppi))
     except Exception as e:
         raise RuntimeError(f"Failed to save resized image to {output_path}: {e}")
     

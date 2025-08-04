@@ -5,6 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 IMAGES_DIR = BASE_DIR / "images"
 INPUT_IMAGES_DIR = IMAGES_DIR / "input"
 OUTPUT_IMAGES_DIR = IMAGES_DIR / "output"
+OUTPUT_TMP_DIR = OUTPUT_IMAGES_DIR / "tmp"
 
 CSV_LOG_DIR = BASE_DIR / "logs"
 CSV_LOG_PATH = CSV_LOG_DIR / "processing_log.csv"

@@ -15,6 +15,7 @@ from math import ceil
 from src.utils import *
 from src.paths import *
 from src.config import *
+from src.estimate_ppi_from_ruler import *
 from src.worker import ImageWorker
 from logs.logger import CSVLogger
 from model.SR_Script.super_resolution import SA_SuperResolution
@@ -155,6 +156,8 @@ def run_standard_processing(processes, threads):
     print(f"❌ Immagini con errore:              {total_error}")
 
     resort_csv_log()
+
+    shutil.rmtree(OUTPUT_TMP_DIR)
 
 
 def main():

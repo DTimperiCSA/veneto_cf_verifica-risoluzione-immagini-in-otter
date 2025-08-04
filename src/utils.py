@@ -10,6 +10,13 @@ from typing import Tuple
 from src.paths import *
 from src.config import *
 
+def validate_image_with_logging(image_path, step, logger):
+    valid, err = is_valid_image_file(image_path)
+    if not valid:
+        logger.log(image_path, step, success=False, error=f"Input image invalid: {err}")
+        return False
+    return True
+
 def resort_csv_log():
     with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
