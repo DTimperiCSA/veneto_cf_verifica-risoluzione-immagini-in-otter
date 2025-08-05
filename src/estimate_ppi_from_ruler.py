@@ -9,6 +9,40 @@ from src.config import *
 from src.paths import *
 from logs.logger import CSVLogger
 
+def estimate_ppi_for_folder(folder_path: Path) -> int | None:
+    try:
+        chromatic_band_img = find_chromatic_band_in_folder(folder_path)
+        if not chromatic_band_img:
+            return None
+
+        chromatic_band_dim_px = measure_chromatic_band_dimension(chromatic_band_img)
+        if not chromatic_band_dim_px:
+            return None
+
+        all_images = sorted([img for img in folder_path.iterdir() if is_valid_image_file(img)])
+        document_images = all_images[:-2] if len(all_images) > 2 else []
+
+        measured_dims = []
+        for img in document_images:
+            bin_img = binaryize_image(img)
+            if not bin_img:
+                continue
+            dims = measure_document_from_binary(bin_img)
+            if dims:
+                measured_dims.append(dims)
+
+        if not measured_dims:
+            return None
+
+        avg_long = sum(max(w, h) for (w, h) in measured_dims) / len(measured_dims)
+        avg_short = sum(min(w, h) for (w, h) in measured_dims) / len(measured_dims)
+
+        estimated_ppi = estimate_ppi_from_dimensions((avg_long, avg_short), chromatic_band_dim_px)
+        print(f"[✅] PPI stimato per {folder_path.name}: {estimated_ppi}")
+        return estimated_ppi
+    except Exception as e:
+        print(f"[⚠️] Errore durante la stima PPI in {folder_path}: {e}")
+        return None
 
 def safe_imread(path: Path, retries=3, delay=0.5):
     """
@@ -88,7 +122,7 @@ def measure_chromatic_band_dimension(path_input: Path):
         short_side = min(w, h)
         return (long_side, short_side)
     else:
-        print(f"⚠️ Nessun righello Tiffen identificato in {path_input}.")
+        (f"⚠️ Nessun righello Tiffen identificato in {path_input}.")
         return None
 
 
