@@ -3,7 +3,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 IMAGES_DIR = BASE_DIR / "images"
-INPUT_IMAGES_DIR = IMAGES_DIR / "input"
+INPUT_IMAGES_DIR = Path(r"C:\Users\andre\Desktop\B001")
 OUTPUT_IMAGES_DIR = IMAGES_DIR / "output"
 OUTPUT_TMP_DIR = OUTPUT_IMAGES_DIR / "tmp"
 
