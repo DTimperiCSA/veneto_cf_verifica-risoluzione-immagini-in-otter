@@ -99,7 +99,7 @@ def run_standard_processing(processes, threads):
 
         ppi = estimate_ppi_for_folder(folder)
         if not ppi:
-            print(f"⚠️ Impossibile stimare PPI per {folder.name}. Skip cartella.")
+            print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
             continue
 
         chunk_size = ceil(len(images) / processes)
