@@ -7,6 +7,8 @@ INPUT_IMAGES_DIR = Path(r"C:\Users\andre\Desktop\B001")
 OUTPUT_IMAGES_DIR = IMAGES_DIR / "output"
 OUTPUT_TMP_DIR = OUTPUT_IMAGES_DIR / "tmp"
 
+TEMPLATE_IMG_PATH = IMAGES_DIR / "assets" / "tiffen_template.tif"
+
 CSV_LOG_DIR = BASE_DIR / "logs"
 CSV_LOG_PATH = CSV_LOG_DIR / "processing_log.csv"
 
