@@ -119,7 +119,7 @@ def measure_chromatic_band_dimension(path_input: Path):
 
 
 def find_chromatic_band_in_folder(folder_path: Path) -> Path:
-    images = [f for f in folder_path.iterdir() if f.is_file() and is_valid_image_file(f)]
+    images = [f for f in folder_path.iterdir() if f.is_file() and is_valid_image_file(f) and f.name.lower() != "thumbs.db"]
     if not images:
         raise FileNotFoundError(f"Nessuna immagine valida trovata in {folder_path}")
 

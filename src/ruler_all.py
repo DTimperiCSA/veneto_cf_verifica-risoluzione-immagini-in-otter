@@ -1,10 +1,12 @@
 # src/ruler_detection_all_methods.py
 """
 Pipeline multi-metodo per rilevare la banda Tiffen (righello + patch) nelle immagini.
-Incluso: metodo basato su istogramma per stimare il "grigio" più rappresentativo.
-- processa SOLO l'ultima immagine di ogni cartella (ricorsivo sotto INPUT_IMAGES_DIR)
-- salva overlay, mask, roi, debug images e un'immagine comparativa con tutti i metodi.
-- preserva estensione originale per immagini salvate.
+Now runs only:
+ - keypoint-based method (ORB)
+ - histogram-based gray estimation
+Keeps improved comparison & selection between these two methods.
+Processes ONLY the last image of each folder (recursive under INPUT_IMAGES_DIR).
+Saves overlay, mask, roi, debug images and a comparative diagnostic image.
 """
 from pathlib import Path
 import cv2
@@ -43,7 +45,6 @@ EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 # colors for overlays (BGR)
 COLORS = {
-    "template": (0, 255, 0),       # green
     "keypoint_orb": (0, 165, 255), # orange
     "hough": (0, 140, 255),        # dark orange
     "slic": (255, 165, 0),         # light color
@@ -194,7 +195,6 @@ def estimate_gray_from_histogram(img_bgr, roi_bbox=None, s_thresh=60, bins=256, 
     """
     Estimate representative grey from histogram of low-saturation pixels.
     Returns dict with mask and thresholds.
-    (unchanged helper; returns hist info but NOT histogram arrays)
     """
     h, w = img_bgr.shape[:2]
     if roi_bbox is not None:
@@ -287,33 +287,11 @@ def estimate_gray_from_histogram(img_bgr, roi_bbox=None, s_thresh=60, bins=256, 
         "histL_info": resL
     }
 
-# ---------------- Methods (as before, unchanged except histogram replaced) ----------------
-def method_template(img, template_gray):
-    try:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        if gray.shape[0] < template_gray.shape[0] or gray.shape[1] < template_gray.shape[1]:
-            return None
-        res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
-    except cv2.error:
-        return None
-    _, max_val, _, max_loc = cv2.minMaxLoc(res)
-    if max_val < MATCH_THRESHOLD:
-        return None
-    h, w = template_gray.shape[:2]
-    top_left = (int(max_loc[0]), int(max_loc[1]))
-    x1, y1 = top_left
-    roi = img[y1:y1+h, x1:x1+w].copy()
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask_roi = cv2.inRange(hsv[:, :, 1], 0, 90)
-    full_mask = np.zeros(img.shape[:2], dtype=np.uint8)
-    full_mask[y1:y1+h, x1:x1+w] = mask_roi
-    rect = np.array([[x1, y1], [x1+w, y1], [x1+w, y1+h], [x1, y1+h]])
-    overlay = overlay_box(img, rect, COLORS["template"])
-    score, metrics = score_mask(full_mask, img)
-    return Result("template", full_mask, overlay, roi, score, {"conf": float(max_val)})
-
+# ---------------- Methods kept: keypoint and histogram ----------------
 def method_keypoint_orb(img, template):
     try:
+        if template is None:
+            return None
         orb = cv2.ORB_create(2000)
         kp1, des1 = orb.detectAndCompute(template, None)
         kp2, des2 = orb.detectAndCompute(img, None)
@@ -335,32 +313,27 @@ def method_keypoint_orb(img, template):
         mask_poly = np.zeros(img.shape[:2], dtype=np.uint8)
         cv2.fillPoly(mask_poly, [transformed], 255)
         overlay = overlay_box(img, transformed, COLORS["keypoint_orb"])
-        roi = img[np.min(transformed[:,1]):np.max(transformed[:,1])+1, np.min(transformed[:,0]):np.max(transformed[:,0])+1].copy()
+        # safe ROI cropping
+        x0, y0 = np.min(transformed[:,0]), np.min(transformed[:,1])
+        x1, y1 = np.max(transformed[:,0]), np.max(transformed[:,1])
+        x0 = max(0, x0); y0 = max(0, y0); x1 = min(img.shape[1], x1); y1 = min(img.shape[0], y1)
+        roi = img[y0:y1+1, x0:x1+1].copy() if x1> x0 and y1>y0 else None
         score, metrics = score_mask(mask_poly, img)
         return Result("keypoint_orb", mask_poly, overlay, roi, score, {"matches": len(matches)})
     except Exception:
         return None
 
-# ... keep other methods (hough, slic, mser, watershed, grabcut, labhsv_bruteforce, precise_gray_expand) unchanged ...
-# For brevity I omit repeating them here — they remain exactly as in your file.
-# (In your actual file keep the implementations above as they were.)
-
-# ---------------- Replaced histogram method ----------------
 def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, out_base: Path=None):
     """
-    Replaced histogram method:
-    - uses the same selection of low-saturation pixels as estimate_gray_from_histogram
-    - computes smoothed histogram of chosen channel (V or L)
-    - creates and saves a histogram visualization image into out_base/DEBUG_DIRNAME
-    - returns Result(...), meta includes histogram info and path to saved histogram image
+    Histogram-based gray estimation.
     """
     try:
         chosen_roi_bbox = None
         tm_conf = None
         if template_gray is not None:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            if gray.shape[0] >= template_gray.shape[0] and gray.shape[1] >= template_gray.shape[1]:
-                try:
+            try:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                if gray.shape[0] >= template_gray.shape[0] and gray.shape[1] >= template_gray.shape[1]:
                     res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
                     _, max_val, _, max_loc = cv2.minMaxLoc(res)
                     if max_val >= MATCH_THRESHOLD:
@@ -369,18 +342,16 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
                         x2, y2 = x1 + w, y1 + h
                         chosen_roi_bbox = (x1,y1,x2,y2)
                         tm_conf = float(max_val)
-                except cv2.error:
-                    chosen_roi_bbox = None
+            except cv2.error:
+                chosen_roi_bbox = None
         if chosen_roi_bbox is None and roi_bbox is not None:
             chosen_roi_bbox = roi_bbox
 
-        # Use estimate_gray_from_histogram to get mask & meta
         est = estimate_gray_from_histogram(img, roi_bbox=chosen_roi_bbox, s_thresh=s_thresh)
         if est is None:
             return None
         mask = est["mask"]
 
-        # Build overlay with box if available
         overlay = img.copy()
         big_mask, largest = largest_component_mask(mask)
         if largest is not None:
@@ -390,13 +361,11 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
         roi_img = None
         if chosen_roi_bbox is not None:
             x1,y1,x2,y2 = chosen_roi_bbox
-            # clamp
             x1 = max(0, x1); y1 = max(0, y1); x2 = min(img.shape[1], x2); y2 = min(img.shape[0], y2)
             if x2 > x1 and y2 > y1:
                 roi_img = img[y1:y2, x1:x2].copy()
 
-        # --- create histogram visualization from ROI (or whole image) ---
-        # choose same valid pixels selection used in the estimator
+        # histogram visualization (from ROI if present)
         if chosen_roi_bbox is not None:
             x1,y1,x2,y2 = chosen_roi_bbox
             x1 = max(0, x1); y1 = max(0, y1); x2 = min(img.shape[1], x2); y2 = min(img.shape[0], y2)
@@ -421,7 +390,6 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
             if vals_V.size == 0:
                 return None
 
-        # compute histogram + smoothed curve (like estimator)
         bins = 256
         histV, edges = np.histogram(vals_V, bins=bins, range=(0,255))
         histL, _ = np.histogram(vals_L, bins=bins, range=(0,255))
@@ -430,23 +398,14 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
         histL_s = np.convolve(histL.astype(np.float32), kernel, mode='same')
         edges_centers = (edges[:-1] + edges[1:]) / 2.0
 
-        # decide chosen channel same as estimator: pick narrower width
-        # reuse est["histV_info"] and est["histL_info"] for lower/upper, but if not present, fallback
-        lower = est.get("lower", None) if isinstance(est, dict) else None
-        upper = est.get("upper", None) if isinstance(est, dict) else None
-        # actually est structure: has 'min','max','lower','upper','median' keys at top level
-        # prefer est["lower"]/["upper"] if present
         lower_v = est.get("lower", None)
         upper_v = est.get("upper", None)
         median_v = est.get("median", None)
 
-        # create histogram image (w=512, h=200)
         Hh = 200; Ww = 512
         hist_img = np.zeros((Hh, Ww, 3), dtype=np.uint8)
-        # choose which smoothed hist to draw: use V histogram if est['space']=='V'
         chosen_space = est.get("space", "V")
         hist_plot = histV_s if chosen_space == 'V' else histL_s
-        # normalize to height
         if hist_plot.max() > 0:
             hp = (hist_plot / (hist_plot.max())) * (Hh - 20)
         else:
@@ -458,30 +417,24 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
             hval = int(hp[i])
             cv2.rectangle(hist_img, (x, Hh-1), (x2, Hh-1 - hval), (180,180,180), -1)
 
-        # draw vertical lines for lower/upper/peak if available
         if lower_v is not None:
             x_l = int((lower_v / 255.0) * (Ww - 1))
-            cv2.line(hist_img, (x_l, 0), (x_l, Hh-1), (0, 0, 255), 2)  # red = lower
+            cv2.line(hist_img, (x_l, 0), (x_l, Hh-1), (0, 0, 255), 2)
         if upper_v is not None:
             x_u = int((upper_v / 255.0) * (Ww - 1))
-            cv2.line(hist_img, (x_u, 0), (x_u, Hh-1), (0, 255, 0), 2)  # green = upper
+            cv2.line(hist_img, (x_u, 0), (x_u, Hh-1), (0, 255, 0), 2)
         if median_v is not None:
             x_m = int((median_v / 255.0) * (Ww - 1))
-            cv2.line(hist_img, (x_m, 0), (x_m, Hh-1), (255, 0, 0), 2)  # blue = median
+            cv2.line(hist_img, (x_m, 0), (x_m, Hh-1), (255, 0, 0), 2)
 
-        # annotate text
         txt = f"space={chosen_space} median={est.get('median'):.1f} lower={est.get('lower')} upper={est.get('upper')}"
         cv2.putText(hist_img, txt, (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220,220,220), 1, cv2.LINE_AA)
 
-        # save histogram image if out_base provided
         hist_rel_path = None
         if out_base is not None:
             debug_dir = Path(out_base) / DEBUG_DIRNAME
             ensure_dir(debug_dir)
-            # prefer png for histogram visualization
             hist_fn = debug_dir / f"histogram_{out_base.name}_{str(np.random.randint(0,1e6))}.png"
-            # Better filename: we will attempt to name using ROI bbox when available
-            # but the process_all caller will know folder/file names, so it will also save meta info
             cv2.imwrite(str(hist_fn), hist_img)
             hist_rel_path = str(hist_fn)
 
@@ -499,14 +452,194 @@ def method_histogram_gray(img, template_gray=None, roi_bbox=None, s_thresh=60, o
     except Exception:
         return None
 
+# ---------------- New comparison helpers (unchanged) ----------------
+def iou_mask(a: np.ndarray, b: np.ndarray):
+    if a is None or b is None:
+        return 0.0
+    a_bin = (a > 0).astype(np.uint8)
+    b_bin = (b > 0).astype(np.uint8)
+    inter = np.logical_and(a_bin, b_bin).sum()
+    union = np.logical_or(a_bin, b_bin).sum()
+    if union == 0:
+        return 0.0
+    return float(inter) / float(union)
+
+def saturation_patch_detection(img_bgr, mask, s_thresh_patch=100, min_area=50, max_area=5000):
+    if mask is None:
+        return 0, 0, []
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    _, S, V = cv2.split(hsv)
+    S_masked = cv2.bitwise_and(S, S, mask=(mask > 0).astype(np.uint8)*255)
+    _, thr = cv2.threshold(S_masked, s_thresh_patch, 255, cv2.THRESH_BINARY)
+    kernel = np.ones((3,3), np.uint8)
+    thr = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kernel, iterations=1)
+    cnts, _ = cv2.findContours(thr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    patches = []
+    total_area = 0
+    for c in cnts:
+        a = cv2.contourArea(c)
+        if a < min_area or a > max_area:
+            continue
+        M = cv2.moments(c)
+        if M.get("m00", 0) == 0:
+            continue
+        cx = int(M["m10"]/M["m00"]); cy = int(M["m01"]/M["m00"])
+        patches.append(((cx, cy), int(a)))
+        total_area += a
+    return len(patches), int(total_area), [p[0] for p in patches]
+
+def ruler_presence_score(img_gray, mask):
+    if mask is None:
+        return 0.0
+    edges = cv2.Canny(img_gray, 50, 150)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=40, minLineLength=30, maxLineGap=8)
+    if lines is None:
+        return 0.0
+    mask_edges = cv2.Canny(mask, 50, 150)
+    count = 0
+    for l in lines:
+        x1,y1,x2,y2 = l[0]
+        mx,my = (x1+x2)//2, (y1+y2)//2
+        if 0 <= my < mask_edges.shape[0] and 0 <= mx < mask_edges.shape[1] and mask_edges[my,mx] > 0:
+            count += 1
+    return min(1.0, count / 10.0)
+
+def analyze_result_for_comparison(r: Result, img: np.ndarray):
+    res = {}
+    res['method'] = r.method
+    res['mask_area'] = int(np.count_nonzero(r.mask)) if r.mask is not None else 0
+    res['score_basic'], res['metrics'] = score_mask(r.mask, img) if r.mask is not None else (0.0, None)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    res['ruler_score'] = ruler_presence_score(gray, r.mask) if r.mask is not None else 0.0
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    _, S, V = cv2.split(hsv)
+    if r.mask is None or r.mask.sum() == 0:
+        res['sat_frac'] = 0.0
+    else:
+        sat_masked = S[r.mask > 0]
+        if sat_masked.size == 0:
+            res['sat_frac'] = 0.0
+        else:
+            res['sat_frac'] = float((sat_masked > 80).sum()) / float(sat_masked.size)
+    num_patches, total_patch_area, patch_centroids = saturation_patch_detection(img, r.mask)
+    res['num_patches'] = num_patches
+    res['patch_area'] = total_patch_area
+    res['patch_centroids'] = patch_centroids
+    big_mask, largest = largest_component_mask(r.mask) if r.mask is not None else (None, None)
+    if largest is not None:
+        x,y,w,h = cv2.boundingRect(largest)
+        res['bbox'] = (x,y,x+w,y+h)
+        res['aspect_ratio'] = max(w,h) / (min(w,h) + 1e-8)
+    else:
+        res['bbox'] = None
+        res['aspect_ratio'] = 0.0
+    return res
+
+def _deterministic_color_for_name(name: str):
+    s = sum(ord(c) for c in name)
+    r = 55 + (s * 37) % 200
+    g = 55 + (s * 61) % 200
+    b = 55 + (s * 97) % 200
+    return (int(b), int(g), int(r))
+
+def compare_and_select_best(results, img, out_base: Path = None, folder: Path = None, last_image = None):
+    if not results:
+        return None, {}
+    feats = {r.method: analyze_result_for_comparison(r, img) for r in results}
+    masks = {r.method: r.mask for r in results}
+    methods = [r.method for r in results]
+    iou = {m: {} for m in methods}
+    for a, b in itertools.permutations(methods, 2):
+        iou[a][b] = iou_mask(masks[a], masks[b])
+    for m in methods:
+        others = [iou[m][o] for o in methods if o != m]
+        feats[m]['mean_iou_with_others'] = float(np.mean(others)) if others else 0.0
+
+    global_patches = any(feats[m]['num_patches'] > 0 for m in methods)
+
+    W_BASIC = 0.3
+    W_RULER = 0.25
+    W_PATCH = 0.25
+    W_IOU = 0.15
+    W_AREA = 0.05
+
+    final_scores = {}
+    for r in results:
+        f = feats[r.method]
+        basic = f.get('score_basic', 0.0)
+        ruler = f.get('ruler_score', 0.0)
+        if global_patches:
+            patch_comp = min(1.0, f.get('num_patches', 0) / 3.0)
+            patch_comp = 0.7*patch_comp + 0.3*min(1.0, f.get('sat_frac', 0.0)*2.0)
+        else:
+            patch_comp = 1.0 - min(1.0, f.get('sat_frac', 0.0))
+        mean_iou = f.get('mean_iou_with_others', 0.0)
+        area_norm = min(1.0, f.get('mask_area', 0) / (img.shape[0]*img.shape[1]*0.02 + 1e-8))
+        combined = (W_BASIC * basic +
+                    W_RULER * ruler +
+                    W_PATCH * patch_comp +
+                    W_IOU * mean_iou +
+                    W_AREA * area_norm)
+        final_scores[r.method] = float(combined)
+        feats[r.method]['combined_score'] = float(combined)
+        feats[r.method]['basic_score'] = float(basic)
+        feats[r.method]['ruler_score'] = float(ruler)
+        feats[r.method]['patch_comp'] = float(patch_comp)
+        feats[r.method]['mean_iou'] = float(mean_iou)
+        feats[r.method]['area_norm'] = float(area_norm)
+
+    best_method = max(final_scores.items(), key=lambda x: x[1])[0]
+    best_result = next((r for r in results if r.method == best_method), results[0])
+
+    diag = img.copy()
+    alpha = 0.35
+    overlay_map = {
+        r.method: COLORS.get(r.method, _deterministic_color_for_name(r.method)) for r in results
+    }
+    for r in results:
+        if r.mask is None:
+            continue
+        color = overlay_map[r.method]
+        mask_col = np.zeros_like(img, dtype=np.uint8)
+        mask_col[r.mask > 0] = color
+        diag = cv2.addWeighted(diag, 1.0, mask_col, alpha, 0)
+
+    y0 = 30
+    for i, m in enumerate(sorted(methods, key=lambda x: -final_scores[x])):
+        txt = f"{m}: combined={final_scores[m]:.3f} basic={feats[m]['basic_score']:.2f} ruler={feats[m]['ruler_score']:.2f} patches={feats[m]['num_patches']}"
+        cv2.putText(diag, txt, (10, y0 + i*22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 1, cv2.LINE_AA)
+        cv2.rectangle(diag, (600, y0 + i*22 - 14), (620, y0 + i*22 - 2), overlay_map[m], -1)
+
+    diag_path = None
+    if out_base is not None and folder is not None and last_image is not None:
+        diag_dir = Path(out_base) / COMPARE_DIR.name
+        ensure_dir(diag_dir)
+        safe_name = f"{folder.name}_{last_image.name}"
+        diag_path = diag_dir / f"diag_{safe_name}.png"
+        cv2.imwrite(str(diag_path), diag)
+
+    diagnostics = {
+        "feats": feats,
+        "iou": iou,
+        "final_scores": final_scores,
+        "best_method": best_method,
+        "diag_path": str(diag_path) if diag_path is not None else None
+    }
+    return best_result, diagnostics
+
 # ---------------- Orchestration ----------------
 def process_all(input_dir: Path, template_path: Path, out_base: Path):
     ensure_dir(out_base)
     ensure_dir(COMPARE_DIR)
-    template = cv2.imread(str(template_path))
-    if template is None:
-        raise FileNotFoundError(f"Template not found: {template_path}")
-    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+    # load template if available (used by keypoint and to optionally guide histogram ROI)
+    template = None
+    template_gray = None
+    if template_path is not None:
+        template = cv2.imread(str(template_path))
+        if template is None:
+            print(f"[WARN] Template exists but cannot be read: {template_path}. Keypoint method will be skipped.")
+        else:
+            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 
     folders = []
     for p in input_dir.rglob("*"):
@@ -527,16 +660,7 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
                 continue
             results = []
 
-            # 1) template
-            r = method_template(img, template_gray)
-            if r:
-                results.append(r)
-                save_with_ext(out_base / f"template_{folder.name}_{last_image.name}", r.overlay)
-                save_with_ext(out_base / MASK_DIRNAME / f"template_{folder.name}_{last_image.name}", r.mask)
-                if r.roi is not None:
-                    save_with_ext(out_base / ROI_DIRNAME / f"template_{folder.name}_{last_image.name}", r.roi)
-
-            # 2) keypoint ORB
+            # keypoint ORB (needs template)
             r = method_keypoint_orb(img, template)
             if r:
                 results.append(r)
@@ -545,9 +669,7 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
                 if r.roi is not None:
                     save_with_ext(out_base / ROI_DIRNAME / f"keypoint_orb_{folder.name}_{last_image.name}", r.roi)
 
-            # ... (other methods kept as before) ...
-
-            # 10) histogram-based gray estimation (REPLACED) - pass out_base so it can save histogram png
+            # histogram-based gray estimation - pass template_gray so it can optionally use ROI
             r = method_histogram_gray(img, template_gray=template_gray, out_base=out_base)
             if r:
                 results.append(r)
@@ -555,7 +677,6 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
                 save_with_ext(out_base / MASK_DIRNAME / f"histogram_gray_{folder.name}_{last_image.name}", r.mask)
                 if r.roi is not None:
                     save_with_ext(out_base / ROI_DIRNAME / f"histogram_gray_{folder.name}_{last_image.name}", r.roi)
-                # save meta info as text
                 meta_path = out_base / DEBUG_DIRNAME / f"histogram_meta_{folder.name}_{last_image.name}.txt"
                 ensure_dir(meta_path.parent)
                 with open(meta_path, "w") as fh:
@@ -572,12 +693,19 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
             if montage is not None:
                 save_with_ext(COMPARE_DIR / f"{folder.name}_{last_image.name}", montage)
 
-            # Score selection
+            # Better comparison + selection (between keypoint and histogram)
             if results:
-                best = max(results, key=lambda x: x.score if x.score is not None else 0.0)
-                print(f"[RESULT] best method for {folder.name}/{last_image.name}: {best.method} score={best.score:.3f} meta={best.meta}")
+                best, diagnostics = compare_and_select_best(results, img, out_base=out_base, folder=folder, last_image=last_image)
+                print(f"[RESULT] selected best for {folder.name}/{last_image.name}: {best.method} combined_score={diagnostics['final_scores'][best.method]:.3f}")
+                print("Diagnostics summary:", {m: diagnostics['final_scores'][m] for m in diagnostics['final_scores']})
+                if diagnostics.get('diag_path'):
+                    print("Saved diagnostic overlay:", diagnostics['diag_path'])
                 save_with_ext(out_base / "best" / f"{best.method}_{folder.name}_{last_image.name}", best.overlay)
                 save_with_ext(out_base / "best" / MASK_DIRNAME / f"{best.method}_{folder.name}_{last_image.name}", best.mask)
+                diag_meta_path = out_base / DEBUG_DIRNAME / f"selection_meta_{folder.name}_{last_image.name}.txt"
+                ensure_dir(diag_meta_path.parent)
+                with open(diag_meta_path, "w") as fh:
+                    fh.write(str(diagnostics))
             else:
                 print("[RESULT] no method produced result for this image.")
 
@@ -589,9 +717,12 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
 
 # ---------------- Small test runner ----------------
 def run_quick_test_on_examples(example_paths):
+    if TEMPLATE_IMG_PATH is None:
+        print("Template path not configured; cannot run keypoint quick test.")
+        return
     template = cv2.imread(str(TEMPLATE_IMG_PATH))
     if template is None:
-        print("Template not found.")
+        print("Template not found or unreadable.")
         return
     template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
     for p in example_paths:
@@ -611,12 +742,13 @@ def run_quick_test_on_examples(example_paths):
         minv, maxv, minloc, maxloc = cv2.minMaxLoc(res)
         h, w = template_gray.shape[:2]
         print(f"[TEST] {p.name}: match_conf={maxv:.3f}, bbox=({maxloc[0]},{maxloc[1]}) - ({maxloc[0]+w},{maxloc[1]+h})")
-# ---------------- CLI runner (pipeline + quick test on last images) ----------------
+
+# ---------------- CLI runner ----------------
 if __name__ == "__main__":
-    ensure_dir(OUTPUT_TMP_DIR)
+    ensure_dir(OUTPUT_BASE)
     print("INPUT_IMAGES_DIR:", INPUT_IMAGES_DIR)
-    print("OUTPUT base:", OUTPUT_TMP_DIR)
-    process_all(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_TMP_DIR)
+    print("OUTPUT base:", OUTPUT_BASE)
+    process_all(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_BASE)
 
     # build example list from the same folders (last image of each)
     example_list = []
@@ -630,4 +762,3 @@ if __name__ == "__main__":
         run_quick_test_on_examples(example_list)
     else:
         print("\nNo last images found for quick tests.")
-

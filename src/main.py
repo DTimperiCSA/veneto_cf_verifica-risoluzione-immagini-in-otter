@@ -24,8 +24,9 @@ from benchmark.benchmark import benchmark
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
 
-# Modifica della funzione per aggiornare via queue
-def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue):
+# ---------- Process batch ----------
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger, progress_queue):
+    """Process a chunk of images in threads."""
     model = SA_SuperResolution(
         models_dir=model_path,
         model_scale=SUPER_RESOLUTION_PAR,
@@ -33,12 +34,11 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         gpu_id=0,
         verbosity=False,
     )
-    logger = CSVLogger(logger_path)
+
     worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model)
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
-
         for future in as_completed(futures):
             img = futures[future]
             try:
@@ -46,11 +46,11 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
             except Exception as e:
                 logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
             finally:
-                progress_queue.put(1)  # segnala un'immagine completata
-
+                progress_queue.put(1)
     logger.stop()
 
-def run_standard_processing(processes, threads):
+# ---------- Standard processing ----------
+def run_standard_processing(processes, threads, logger: CSVLogger):
     print("🔍 Caricamento modello di super-risoluzione (test iniziale)...")
     try:
         _ = SA_SuperResolution(
@@ -61,19 +61,16 @@ def run_standard_processing(processes, threads):
             verbosity=True,
         )
     except Exception as e:
+        logger.log_crash(f"Errore caricamento modello SR: {e}")
         raise RuntimeError(f"Errore nel caricamento modello SR: {e}")
 
     print("\n📂 Scansione cartelle da elaborare...")
-
     super_resolution_dir, downscaling_dir = find_output_dir()
     folders = [f for f in INPUT_IMAGES_DIR.rglob("*") if f.is_dir()]
     folder_to_images = {}
 
     for folder in folders:
-        images = [
-            img for img in folder.glob("*")
-            if is_valid_image_file(img)
-        ]
+        images = [img for img in folder.glob("*") if is_valid_image_file(img) and img.name.lower() != "thumbs.db"]
         images_to_process = []
         for img in images:
             rel = img.relative_to(INPUT_IMAGES_DIR)
@@ -83,6 +80,8 @@ def run_standard_processing(processes, threads):
                 images_to_process.append(img)
         if images_to_process:
             folder_to_images[folder] = images_to_process
+        else:
+            logger.log(folder.name, "no_images_to_process", success=False, error="Nessuna immagine da processare", full_path=str(folder))
 
     if not folder_to_images:
         print("✅ Tutte le immagini risultano già elaborate.")
@@ -99,6 +98,7 @@ def run_standard_processing(processes, threads):
 
         ppi = estimate_ppi_for_folder(folder)
         if not ppi:
+            logger.log(folder.name, "estimate_ppi", success=False, error="Impossibile stimare PPI", full_path=str(folder))
             print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
             continue
 
@@ -119,7 +119,6 @@ def run_standard_processing(processes, threads):
             set_start_method("spawn", force=True)
             with Pool(processes) as pool:
                 result = pool.map_async(target, chunks)
-
                 completed = 0
                 with tqdm(total=len(images), desc="📷 Immagini elaborate", ncols=80) as pbar:
                     while completed < len(images):
@@ -139,15 +138,18 @@ def run_standard_processing(processes, threads):
         except KeyboardInterrupt:
             print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
             sys.exit(0)
+        except Exception as e:
+            logger.log_crash(f"Errore multiprocessing: {e}")
+            raise
 
-        # Conta successi e fallimenti per questa cartella
+        # Conta successi e fallimenti
         folder_error_count = 0
         if CSV_LOG_PATH.exists():
             with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 folder_error_count = sum(
                     1 for row in reader
-                    if row["status"] == "false" and Path(row["filename"]).parent.name == folder.name
+                    if row["status"] == "false" and Path(row["full_path"]).parent.name == folder.name
                 )
 
         folder_success = len(images) - folder_error_count
@@ -160,24 +162,21 @@ def run_standard_processing(processes, threads):
     print(f"✅ Immagini processate con successo: {total_success}")
     print(f"❌ Immagini con errore:              {total_error}")
 
-    resort_csv_log()
+    logger.sort_itslef()
 
-    #shutil.rmtree(OUTPUT_TMP_DIR)
-
-
+# ---------- Main ----------
 def main():
-    parser = argparse.ArgumentParser(description="Processa immagini o esegui benchmark.")
-    parser.add_argument("--benchmark", action="store_true", help="Esegui benchmark multiprocesso e multithread")
-    args = parser.parse_args()
+    if CSV_LOG_PATH.exists():
+        print(f"📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
+        CSV_LOG_PATH.unlink()
+    logger = CSVLogger(CSV_LOG_PATH)
 
-    if args.benchmark:
-        benchmark()
-        return
-
+    # ---------- Check or run benchmark ----------
     if not JSON_BENCHMARK_BEST_CONFIG_PATH.exists():
         print("⚠️ Nessuna configurazione ottimale trovata. Eseguo benchmark...")
         benchmark()
 
+    # ---------- Load best config ----------
     with JSON_BENCHMARK_BEST_CONFIG_PATH.open("r", encoding="utf-8") as f:
         best_config = json.load(f)
 
@@ -185,30 +184,32 @@ def main():
     threads = int(best_config["threads"])
     print(f"\n📌 Uso della configurazione ottimale: {processes} processi, {threads} thread")
 
-    try:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            if CSV_LOG_PATH.exists():
-                print(f"\n📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
-                CSV_LOG_PATH.unlink()
-            try:
-                print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
-                run_standard_processing(processes, threads)
-                print("✅ Elaborazione completata con successo.")
-                break
-            except KeyboardInterrupt:
-                print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
-                sys.exit(0)
-            except Exception as e:
-                print(f"\n❌ Crash: {e}")
-                if attempt < MAX_ATTEMPTS:
-                    print(f"⏳ Nuovo tentativo in {RETRY_DELAY} secondi...")
-                    time.sleep(RETRY_DELAY)
-                else:
-                    print("\n❌ Numero massimo di tentativi raggiunto. Uscita.")
-                    sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
-        sys.exit(0)
+    # ---------- Standard processing with retries ----------
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
+            run_standard_processing(processes, threads, logger)
+            print("✅ Elaborazione completata con successo.")
+            break
+        except KeyboardInterrupt:
+            print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
+            sys.exit(0)
+        except Exception as e:
+            logger.log_crash(f"Crash generale: {e}")
+            print(f"\n❌ Crash: {e}")
+            if attempt < MAX_ATTEMPTS:
+                print(f"⏳ Nuovo tentativo in {RETRY_DELAY} secondi...")
+                time.sleep(RETRY_DELAY)
+            else:
+                print("\n❌ Numero massimo di tentativi raggiunto. Uscita.")
+                sys.exit(1)
+        finally:
+            tmp_dir = OUTPUT_TMP_DIR # or any directory you want to remove
+            if tmp_dir.exists() and tmp_dir.is_dir():
+                print(f"🗑️ Pulizia della directory temporanea: {tmp_dir}")
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    logger.stop()
 
 
 if __name__ == "__main__":

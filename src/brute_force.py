@@ -15,12 +15,13 @@ import numpy as np
 import traceback
 
 from src.paths import INPUT_IMAGES_DIR, OUTPUT_TMP_DIR, TEMPLATE_IMG_PATH
+from src.utils import *
 
 # ---------- CONFIG ----------
 MATCH_THRESHOLD = 0.60
 EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
-OUTPUT_BASE = Path(OUTPUT_TMP_DIR) / "histkey_compare"
+OUTPUT_BASE = Path(OUTPUT_TMP_DIR) / "histkey_compare_all_bands"
 COMPARE_DIR = OUTPUT_BASE / "confronti"
 ROI_DIR = OUTPUT_BASE / "roi"
 MASK_DIR = OUTPUT_BASE / "masks"
@@ -307,6 +308,75 @@ def compare_and_save_two(roi_hist_res, kp_res, img, folder_name, base_name, out_
     print(f"[COMPARE] saved combined image/stats for {folder_name}/{base_name} -> IoU rk={iou_rk:.3f}, areas: roi={area_r}, kp={area_k}")
 
 # ---------- Orchestration ----------
+# ---------- Orchestration ----------
+def process_all_images(input_dir: Path, template_path: Path, out_base: Path):
+    ensure_dir(out_base)
+    ensure_dir(COMPARE_DIR)
+    ensure_dir(ROI_DIR)
+    ensure_dir(MASK_DIR)
+    ensure_dir(DEBUG_DIR)
+    ensure_dir(BEST_DIR)
+
+    input_dir = Path(r"C:\Users\andre\Desktop\x_transfer")
+
+    # Load template
+    template = cv2.imread(str(template_path))
+    if template is None:
+        raise FileNotFoundError(f"Template not found: {template_path}")
+    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+
+    # Find all valid images in the folder (recursively)
+    images = [
+        img_path for img_path in input_dir.rglob("*")
+        if img_path.is_file() and is_valid_image_file(img_path)
+    ]
+    if not images:
+        print("[WARN] No valid images found.")
+        return
+
+    print(f"\n➡ Processing {len(images)} images from: {input_dir}")
+
+    for image_path in images:
+        try:
+            img = cv2.imread(str(image_path))
+            if img is None:
+                print(f"[ERR] Cannot read {image_path}")
+                continue
+
+            base_name = image_path.stem
+            ext = image_path.suffix
+            folder_name = image_path.parent.name  # keeps track of which subfolder the image was in
+
+            # roi-histogram (requires template)
+            roi_hist_res = method_histogram_roi(img, template_gray)
+
+            # keypoint
+            kp_res = method_keypoint_orb(img, template)
+
+            # Save overlays/masks/roi
+            if roi_hist_res:
+                save_with_ext(out_base / f"roi_hist_{folder_name}_{base_name}{ext}", roi_hist_res["overlay"])
+                if roi_hist_res.get("mask") is not None:
+                    save_with_ext(MASK_DIR / f"roi_hist_mask_{folder_name}_{base_name}{ext}", roi_hist_res["mask"])
+                if roi_hist_res.get("roi") is not None:
+                    save_with_ext(ROI_DIR / f"roi_hist_roi_{folder_name}_{base_name}{ext}", roi_hist_res["roi"])
+            if kp_res:
+                save_with_ext(out_base / f"keypoint_{folder_name}_{base_name}{ext}", kp_res["overlay"])
+                if kp_res.get("mask") is not None:
+                    save_with_ext(MASK_DIR / f"kp_mask_{folder_name}_{base_name}{ext}", kp_res["mask"])
+                if kp_res.get("roi") is not None:
+                    save_with_ext(ROI_DIR / f"kp_roi_{folder_name}_{base_name}{ext}", kp_res["roi"])
+
+            # Compare and save combined outputs/stats
+            compare_and_save_two(roi_hist_res, kp_res, img, folder_name, base_name, out_base, ext)
+
+        except Exception as e:
+            print(f"[ERROR] processing image {image_path}: {e}")
+            traceback.print_exc()
+
+    print(f"\nDone. Results saved under: {out_base}")
+
+
 def process_all(input_dir: Path, template_path: Path, out_base: Path):
     ensure_dir(out_base)
     ensure_dir(COMPARE_DIR)
@@ -371,7 +441,10 @@ def process_all(input_dir: Path, template_path: Path, out_base: Path):
 
 # ---------- CLI ----------
 if __name__ == "__main__":
-    ensure_dir(OUTPUT_TMP_DIR / "histkey_compare")
+    ensure_dir(OUTPUT_BASE)
     print("INPUT_IMAGES_DIR:", INPUT_IMAGES_DIR)
-    print("OUTPUT base:", OUTPUT_TMP_DIR / "histkey_compare")
-    process_all(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_TMP_DIR / "histkey_compare")
+    print("OUTPUT base:", OUTPUT_BASE)
+    
+    process_all_images(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_BASE)
+
+    #process_all(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_BASE)
