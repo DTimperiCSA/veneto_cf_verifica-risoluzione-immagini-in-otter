@@ -1,0 +1,16 @@
+__init__
+brute_force
+compare
+config
+image_processing
+image_utils
+main
+methods
+paths
+ruler_all
+segmentation
+src
+tmp
+to_delete
+utils
+worker

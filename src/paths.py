@@ -14,6 +14,7 @@ CSV_LOG_PATH = CSV_LOG_DIR / "processing_log.csv"
 
 MODEL_DIR = BASE_DIR / "model"
 SR_SCRIPT_MODEL_DIR = MODEL_DIR / "SR_Script" / "super_res"
+UNET_MODEL_DIR = MODEL_DIR / "tiffen_segmenter_best.pth"
 
 BENCHMARK_DIR = BASE_DIR / "benchmark"
 BENCHMARK_IMAGES_DIR = BENCHMARK_DIR / "images"

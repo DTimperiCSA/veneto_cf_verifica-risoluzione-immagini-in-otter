@@ -15,7 +15,8 @@ from math import ceil
 from src.utils import *
 from src.paths import *
 from src.config import *
-from src.estimate_ppi_from_ruler import *
+from src.image_utils import *
+from src.image_processing import *
 from src.worker import ImageWorker
 from logs.logger import CSVLogger
 from model.SR_Script.super_resolution import SA_SuperResolution
@@ -25,8 +26,13 @@ MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
 
 # ---------- Process batch ----------
-def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger, progress_queue):
-    """Process a chunk of images in threads."""
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
+    from src.worker import ImageWorker
+    from logs.logger import CSVLogger
+    from model.SR_Script.super_resolution import SA_SuperResolution
+
+    logger = CSVLogger(logger_path)
+
     model = SA_SuperResolution(
         models_dir=model_path,
         model_scale=SUPER_RESOLUTION_PAR,
@@ -35,8 +41,8 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         verbosity=False,
     )
 
-    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model)
-
+    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model, ppi)
+    
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
         for future in as_completed(futures):
@@ -47,7 +53,9 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
                 logger.log(img.name, "run", success=False, error=f"Thread error: {e}")
             finally:
                 progress_queue.put(1)
+
     logger.stop()
+
 
 # ---------- Standard processing ----------
 def run_standard_processing(processes, threads, logger: CSVLogger):
@@ -64,28 +72,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         logger.log_crash(f"Errore caricamento modello SR: {e}")
         raise RuntimeError(f"Errore nel caricamento modello SR: {e}")
 
-    print("\n📂 Scansione cartelle da elaborare...")
     super_resolution_dir, downscaling_dir = find_output_dir()
-    folders = [f for f in INPUT_IMAGES_DIR.rglob("*") if f.is_dir()]
-    folder_to_images = {}
-
-    for folder in folders:
-        images = [img for img in folder.glob("*") if is_valid_image_file(img) and img.name.lower() != "thumbs.db"]
-        images_to_process = []
-        for img in images:
-            rel = img.relative_to(INPUT_IMAGES_DIR)
-            subdir = rel.parent
-            out_path = downscaling_dir / subdir / img.name
-            if not out_path.exists():
-                images_to_process.append(img)
-        if images_to_process:
-            folder_to_images[folder] = images_to_process
-        else:
-            logger.log(folder.name, "no_images_to_process", success=False, error="Nessuna immagine da processare", full_path=str(folder))
-
-    if not folder_to_images:
-        print("✅ Tutte le immagini risultano già elaborate.")
-        return
 
     manager = Manager()
     progress_queue = manager.Queue()
@@ -93,15 +80,47 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
     total_success = 0
     total_error = 0
 
-    for folder, images in folder_to_images.items():
-        print(f"\n📂 Cartella: {folder} ({len(images)} immagini da processare)")
+    print(f"\n")
 
-        ppi = estimate_ppi_for_folder(folder)
+    for folder in INPUT_IMAGES_DIR.rglob("*"):
+        if not folder.is_dir():
+            continue
+
+        print(f"📌 Folder: {folder}")
+
+        images = [img for img in folder.glob("*") if is_valid_image_file(img) and img.name.lower() != "thumbs.db"]
+        if not images:
+            logger.log(folder.name, "no_images_to_process", success=False, error="Nessuna immagine da processare", full_path=str(folder))
+            continue
+
+        # compute the corresponding downscaling folder
+        relative_folder = folder.relative_to(INPUT_IMAGES_DIR)
+        target_folder = downscaling_dir / relative_folder
+
+        # check if *all* images exist in target folder
+        all_exist = all((target_folder / img.name).exists() for img in images)
+
+        print("alll exist", all_exist)
+        print(f"{folder}, ,{relative_folder} {target_folder}, {relative_folder}")
+        if all_exist:
+            logger.log(folder.name, "all_images_to_process", success=False, error="Tutte le immagini sono già state prrocessate", full_path=str(folder))
+            continue
+
+        try:
+            chromatic_band_path = find_chromatic_band_in_folder(folder)
+            if chromatic_band_path is None:
+                raise ValueError("Chromatic band is None")
+        except Exception as e:
+            logger.log_crash(f"Can't find a chromatic band: {e}", full_path=str(folder))
+            continue
+
+        ppi = estimate_ppi_from_chromatic_band(chromatic_band_path)
         if not ppi:
             logger.log(folder.name, "estimate_ppi", success=False, error="Impossibile stimare PPI", full_path=str(folder))
             print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
             continue
 
+        # --- multiprocessing chunking and processing ---
         chunk_size = ceil(len(images) / processes)
         chunks = list(chunked(images, chunk_size))
 
@@ -113,6 +132,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             model_path=SR_SCRIPT_MODEL_DIR,
             logger_path=CSV_LOG_PATH,
             progress_queue=progress_queue,
+            ppi=ppi
         )
 
         try:
@@ -156,7 +176,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         total_success += folder_success
         total_error += folder_error_count
 
-        print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}")
+        print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}\n")
 
     print("\n📊 Risultato finale:")
     print(f"✅ Immagini processate con successo: {total_success}")

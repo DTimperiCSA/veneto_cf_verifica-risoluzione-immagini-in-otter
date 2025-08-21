@@ -750,6 +750,8 @@ if __name__ == "__main__":
     print("OUTPUT base:", OUTPUT_BASE)
     process_all(INPUT_IMAGES_DIR, TEMPLATE_IMG_PATH, OUTPUT_BASE)
 
+    INPUT_IMAGES_DIR = Path(r"C:\Users\andre\Desktop\x_transfer")
+
     # build example list from the same folders (last image of each)
     example_list = []
     for p in INPUT_IMAGES_DIR.rglob("*"):
