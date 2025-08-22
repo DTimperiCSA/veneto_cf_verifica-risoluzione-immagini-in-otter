@@ -100,8 +100,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         # check if *all* images exist in target folder
         all_exist = all((target_folder / img.name).exists() for img in images)
 
-        print("alll exist", all_exist)
-        print(f"{folder}, ,{relative_folder} {target_folder}, {relative_folder}")
         if all_exist:
             logger.log(folder.name, "all_images_to_process", success=False, error="Tutte le immagini sono già state prrocessate", full_path=str(folder))
             continue
