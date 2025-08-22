@@ -308,9 +308,3 @@ def train_model():
     print(f"☑️  Best val_loss: {best_val_loss:.4f}")
     if SAVE_PATH.exists():
         print(f"📦 Modello salvato: {SAVE_PATH}")
-
-
-if __name__ == "__main__":
-    # Evita crash casuali tra worker dataloader
-    os.environ.setdefault("PYTHONHASHSEED", str(SEED))
-    train_model()

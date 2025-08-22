@@ -1,46 +1,46 @@
-# ==========================================
-# prepare_dataset_with_no_ruler.py
-# ==========================================
-
 from pathlib import Path
 import shutil
 import random
 from PIL import Image
-import albumentations as A
 import numpy as np
-
-from src.paths import *
+import albumentations as A
 
 # =========================
-# Albumentations augmentations
+# Config
 # =========================
-def get_augmentations(img_size=512):
+SRC_IMAGES = Path(r"C:\Users\andre\Desktop\data\images")               # with masks
+SRC_MASKS = Path(r"C:\Users\andre\Desktop\data\masks")
+SRC_NO_MASK = Path(r"C:\Users\andre\Desktop\data\images_without_mask")  # no masks
+SPLIT_DIR = Path(r"C:\Users\andre\Desktop\dataset")
+
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
+SEED = 42
+AUGMENT_FACTOR = 5
+IMG_SIZE = 512
+
+
+# =========================
+# Augmentations
+# =========================
+def get_augmentations(img_size=IMG_SIZE):
     return A.Compose([
         A.Resize(img_size, img_size),
-        A.RandomResizedCrop(size=(img_size, img_size),
-                            scale=(0.8, 1.0),
-                            ratio=(0.9, 1.1), p=0.5),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1,
-                           rotate_limit=15, p=0.5),
-        A.ColorJitter(brightness=0.2, contrast=0.2,
-                      saturation=0.2, hue=0.1, p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.1, rotate_limit=15, p=0.5),
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
     ])
 
 
 def augment_and_save(img_path, mask_path, out_img_dir, out_mask_dir, aug_index):
     aug = get_augmentations()
     img = np.array(Image.open(img_path).convert("RGB"))
-    mask = np.array(Image.open(mask_path).convert("L")) if mask_path.exists() \
-        else np.zeros(img.shape[:2], dtype=np.uint8)
-
+    mask = np.array(Image.open(mask_path).convert("L"))
     augmented = aug(image=img, mask=mask)
-
-    aug_img = Image.fromarray(np.uint8(augmented['image']))
-    aug_mask = Image.fromarray(np.uint8(augmented['mask']))
-
+    aug_img = Image.fromarray(augmented['image'])
+    aug_mask = Image.fromarray(augmented['mask'])
     img_name = img_path.stem + f"_aug{aug_index}" + img_path.suffix
     mask_name = mask_path.stem + f"_aug{aug_index}" + mask_path.suffix
     aug_img.save(out_img_dir / img_name)
@@ -48,142 +48,94 @@ def augment_and_save(img_path, mask_path, out_img_dir, out_mask_dir, aug_index):
 
 
 # =========================
-# Build dataset with 'no ruler' images
+# Step 1: Collect dataset
 # =========================
-# =========================
-# Build dataset con ricerca flessibile
-# =========================
-def build_dataset(mask_dir, input_images_root, tmp_out):
-    mask_dir = Path(mask_dir)
-    input_images_root = Path(input_images_root)
-    tmp_out = Path(tmp_out)
+def collect_datasets(src_img_dir, src_mask_dir, src_no_mask_dir):
+    with_masks = []
+    without_masks = []
 
-    images_out = tmp_out / "images"
-    masks_out = tmp_out / "masks"
-    images_out.mkdir(parents=True, exist_ok=True)
-    masks_out.mkdir(parents=True, exist_ok=True)
+    # case 1: real images + real masks
+    for img_path in src_img_dir.glob("*"):
+        mask_path = src_mask_dir / img_path.name
+        if mask_path.exists():
+            with_masks.append((img_path, mask_path))
+        else:
+            print(f"⚠️ Missing mask for {img_path}, skipped")
 
-    valid_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
-    paired = []
+    # case 2: images without masks → black mask placeholder
+    for img_path in src_no_mask_dir.glob("*"):
+        without_masks.append((img_path, None))
 
-    for mask_path in sorted(mask_dir.glob("*")):
-        if not mask_path.is_file():
-            continue
-
-        stem = mask_path.stem  # es: B001.015_0007
-        dir_name = stem.split("_")[0]  # es: B001.015
-        number_part = stem.split("_")[1] if "_" in stem else stem
-        folder = input_images_root / dir_name
-
-        if not folder.exists():
-            print(f"⚠️ Skipping {mask_path.name}: folder {folder} not found")
-            continue
-
-        # Trova immagine col righello cercando numero nel nome
-        img_candidates = [p for p in folder.glob("*") if p.suffix.lower() in valid_exts]
-        ruler_img = next((c for c in img_candidates if number_part in c.stem), None)
-        if ruler_img is None:
-            print(f"⚠️ No ruler image found for {mask_path.name} in {folder}")
-            continue
-
-        # Copia immagine col righello + mask
-        dst_img = images_out / ruler_img.name
-        dst_mask = masks_out / mask_path.name
-        shutil.copy(ruler_img, dst_img)
-        shutil.copy(mask_path, dst_mask)
-        paired.append((dst_img, dst_mask))
-
-        # Trova prima immagine della cartella che non è quella del righello
-        no_ruler_img = next((c for c in img_candidates if c != ruler_img), None)
-        if no_ruler_img is None:
-            print(f"⚠️ No 'no_ruler' image found in {folder}")
-            continue
-
-        dst_name = f"noruler_{stem}{no_ruler_img.suffix}"
-        dst_img_nr = images_out / dst_name
-        dst_mask_nr = masks_out / f"noruler_{stem}.png"
-
-        shutil.copy(no_ruler_img, dst_img_nr)
-
-        # Crea mask nera con stesse dimensioni
-        with Image.open(no_ruler_img) as im:
-            black = Image.new("L", im.size, 0)
-            black.save(dst_mask_nr)
-
-        paired.append((dst_img_nr, dst_mask_nr))
-
-    print(f"✅ Built paired dataset: {len(paired)} samples")
-    return images_out, masks_out
+    return with_masks, without_masks
 
 
 # =========================
-# Dataset split + augmentation
+# Step 2: Split stratified
 # =========================
-def split_dataset(images_dir, masks_dir, output_dir,
-                  train_ratio=0.7, val_ratio=0.15,
-                  seed=42, augment_factor=2):
+def stratified_split(with_masks, without_masks, train_ratio=TRAIN_RATIO, val_ratio=VAL_RATIO):
+    random.seed(SEED)
 
-    random.seed(seed)
-    images_dir = Path(images_dir)
-    masks_dir = Path(masks_dir)
-    output_dir = Path(output_dir)
+    def split_list(lst):
+        lst = lst.copy()
+        random.shuffle(lst)
+        total = len(lst)
+        train_count = int(total * train_ratio)
+        val_count = int(total * val_ratio)
+        return {
+            "train": lst[:train_count],
+            "val": lst[train_count:train_count + val_count],
+            "test": lst[train_count + val_count:]
+        }
 
-    all_images = [p for p in images_dir.glob("*") if p.is_file()]
-    random.shuffle(all_images)
+    splits_with = split_list(with_masks)
+    splits_without = split_list(without_masks)
 
-    total = len(all_images)
-    train_count = int(total * train_ratio)
-    val_count = int(total * val_ratio)
+    # merge splits
+    splits = {}
+    for k in ["train", "val", "test"]:
+        splits[k] = splits_with[k] + splits_without[k]
+        random.shuffle(splits[k])  # mix them
 
-    splits = {
-        "train": all_images[:train_count],
-        "val": all_images[train_count:train_count + val_count],
-        "test": all_images[train_count + val_count:]
-    }
+    return splits
 
-    for split_name, files in splits.items():
-        print(f"Processing {split_name}...")
+
+# =========================
+# Step 3: Save to disk
+# =========================
+def save_splits(splits, output_dir, augment_factor=AUGMENT_FACTOR):
+    for split_name, pairs in splits.items():
+        print(f"Processing {split_name}... ({len(pairs)} samples)")
         img_out = output_dir / f"{split_name}_images"
         mask_out = output_dir / f"{split_name}_masks"
         img_out.mkdir(parents=True, exist_ok=True)
         mask_out.mkdir(parents=True, exist_ok=True)
 
-        for img_path in files:
-            mask_path = masks_dir / img_path.name
-            # Copia immagine originale + mask
-            shutil.copy(img_path, img_out / img_path.name)
-            if not mask_path.exists():
-                with Image.open(img_path) as img:
-                    black_mask = Image.new("L", img.size, 0)
-                    black_mask.save(mask_out / img_path.name)
-            else:
-                shutil.copy(mask_path, mask_out / mask_path.name)
+        for img_path, mask_path in pairs:
+            dst_img = img_out / img_path.name
+            shutil.copy(img_path, dst_img)
 
-            # Solo training: augmentations
+            if mask_path:  # real mask
+                dst_mask = mask_out / img_path.name
+                shutil.copy(mask_path, dst_mask)
+            else:  # fake black mask
+                with Image.open(img_path) as im:
+                    black_mask = Image.new("L", im.size, 0)
+                    dst_mask = mask_out / img_path.name
+                    black_mask.save(dst_mask)
+
             if split_name == "train":
                 for i in range(augment_factor):
-                    augment_and_save(img_path, mask_path, img_out, mask_out, i)
+                    augment_and_save(dst_img, dst_mask, img_out, mask_out, i)
 
-        total_imgs = len(files) * (1 + augment_factor) if split_name == "train" else len(files)
-        print(f"ℹ️  Split '{split_name}': {total_imgs} images")
+        print(f"ℹ️ Split '{split_name}': {len(pairs)} (before augmentation)")
 
-    print(f"✅ Dataset split and augmentation complete: {output_dir}")
+    print(f"✅ Stratified split saved to {output_dir}")
 
 
 # =========================
-# Main
+# Run
 # =========================
 if __name__ == "__main__":
-    INPUT_IMAGES_DIR = INPUT_IMAGES_DIR
-    MASK_DIR = r"C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\images\dataset\mask"
-    TMP_OUT = Path(OUTPUT_TMP_DIR / "tmp_dataset")
-    FINAL_OUT = Path("data_final")
-
-    # Step 1: build paired dataset (ruler + no_ruler)
-    images_dir, masks_dir = build_dataset(MASK_DIR, INPUT_IMAGES_DIR, TMP_OUT)
-
-    # Step 2: split + augment
-    split_dataset(images_dir, masks_dir, FINAL_OUT,
-                  train_ratio=0.7, val_ratio=0.15, augment_factor=5)
-
-
+    with_masks, without_masks = collect_datasets(SRC_IMAGES, SRC_MASKS, SRC_NO_MASK)
+    splits = stratified_split(with_masks, without_masks)
+    save_splits(splits, SPLIT_DIR)

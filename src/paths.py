@@ -21,3 +21,9 @@ BENCHMARK_IMAGES_DIR = BENCHMARK_DIR / "images"
 CSV_BENCHMARK_LOG_PATH = BENCHMARK_DIR / "benchmark_log.csv"
 JSON_BENCHMARK_BEST_CONFIG_PATH = BENCHMARK_DIR / "benchmark_results.json"
 
+DATASET_DIR = IMAGES_DIR / "dataset"
+DATASET_IMAGES_DIR = DATASET_DIR / "images"
+DATASET_MASK_DIR = DATASET_DIR / "mask"
+
+CONSERVATORIO_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio")
+PROVA_DIR = Path(r"C:\Users\andre\Desktop\Conservatorio")

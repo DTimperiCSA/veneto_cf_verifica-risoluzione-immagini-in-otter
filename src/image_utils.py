@@ -14,6 +14,8 @@ from src.paths import *
 from src.config import *
 from src.image_utils import *
 
+COL_KP = (255, 0, 0)
+
 def safe_imread(path: Path, retries=3, delay=0.5):
     for attempt in range(retries):
         img = cv2.imread(str(path))
@@ -294,7 +296,57 @@ def measure_document_from_binary(binary_image_path: Path) -> tuple[float, float]
 
     return (long_side_px, short_side_px)
 
+def largest_component_mask(mask):
+    cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None, None
+    largest = max(cnts, key=cv2.contourArea)
+    big_mask = np.zeros_like(mask)
+    cv2.drawContours(big_mask, [largest], -1, 255, thickness=-1)
+    return big_mask, largest
 
+def method_keypoint_orb(img, template):    
+    try:
+        orb = cv2.ORB_create(3000)
+        kp1, des1 = orb.detectAndCompute(template, None)
+        kp2, des2 = orb.detectAndCompute(img, None)
+        if des1 is None or des2 is None:
+            return None
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+        matches = sorted(matches, key=lambda x: x.distance)[:3000]  # cap
+        if len(matches) < 8:
+            return None
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+        M, inliers_mask = cv2.estimateAffinePartial2D(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+        if M is None:
+            return None
+        h, w = template.shape[:2]
+        corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 2)
+        transformed = cv2.transform(np.array([corners]), M)[0].astype(int)
+        # clamp coords
+        transformed[:,0] = np.clip(transformed[:,0], 0, img.shape[1]-1)
+        transformed[:,1] = np.clip(transformed[:,1], 0, img.shape[0]-1)
+        mask_poly = np.zeros(img.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask_poly, [transformed], 255)
+        # keep largest connected comp (to remove tiny noisy polygons)
+        big, largest = largest_component_mask(mask_poly)
+        if big is not None:
+            mask_poly = big
+        overlay = img.copy()
+        cv2.drawContours(overlay, [transformed], -1, COL_KP, 3)
+        # roi bounding rect from transformed poly
+        minx = np.min(transformed[:,0]); maxx = np.max(transformed[:,0])
+        miny = np.min(transformed[:,1]); maxy = np.max(transformed[:,1])
+        if maxx<=minx or maxy<=miny:
+            roi = None
+        else:
+            roi = img[miny:maxy+1, minx:maxx+1].copy()
+        meta = {"matches": len(matches)}
+        return {"method": "keypoint", "mask": mask_poly, "overlay": overlay, "roi": roi, "meta": meta}
+    except Exception:
+        return None
     
 
 
