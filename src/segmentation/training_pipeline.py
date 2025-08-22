@@ -81,10 +81,6 @@ def collect_datasets(src_img_dir, src_mask_dir, src_no_mask_dir):
 
     return with_masks, without_masks
 
-
-# =========================
-# Step 2: Stratified split
-# =========================
 # =========================
 # Step 2: Stratified split (bilanciato con e senza maschere)
 # =========================
@@ -162,11 +158,15 @@ if __name__ == "__main__":
     # 1️⃣ Gather datasets
     with_masks, without_masks = collect_datasets(SRC_IMAGES, SRC_MASKS, SRC_NO_MASK)
 
-    # 2️⃣ Stratified split
-    splits = stratified_split(with_masks, without_masks)
+    # 2️⃣ Check if splits already exist
+    if (SPLIT_DIR / "train_images").exists() and (SPLIT_DIR / "val_images").exists() and (SPLIT_DIR / "test_images").exists():
+        print("✅ Split dataset already exists, skipping split/augmentation.")
+    else:
+        print("🚀 Creating new stratified split...")
+        splits = stratified_split(with_masks, without_masks)
 
-    # 3️⃣ Save splits with augmentation
-    save_splits(splits, SPLIT_DIR)
+        # 3️⃣ Save splits with augmentation
+        save_splits(splits, SPLIT_DIR)
 
     # 4️⃣ Start training process
     os.environ.setdefault("PYTHONHASHSEED", str(SEED))

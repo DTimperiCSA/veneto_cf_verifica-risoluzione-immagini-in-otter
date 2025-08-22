@@ -1,9 +1,10 @@
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DESKTOP_DIR = Path.home() / "Desktop"
 
 IMAGES_DIR = BASE_DIR / "images"
-INPUT_IMAGES_DIR = Path(r"C:\Users\andre\Desktop\B001")
+INPUT_IMAGES_DIR = DESKTOP_DIR / "B001"
 OUTPUT_IMAGES_DIR = IMAGES_DIR / "output"
 OUTPUT_TMP_DIR = OUTPUT_IMAGES_DIR / "tmp"
 
@@ -13,17 +14,22 @@ CSV_LOG_DIR = BASE_DIR / "logs"
 CSV_LOG_PATH = CSV_LOG_DIR / "processing_log.csv"
 
 MODEL_DIR = BASE_DIR / "model"
+CHECKPOINT_DIR = MODEL_DIR / "checkpoints"
 SR_SCRIPT_MODEL_DIR = MODEL_DIR / "SR_Script" / "super_res"
-UNET_MODEL_DIR = MODEL_DIR / "tiffen_segmenter_best.pth"
+SAVE_PATH = MODEL_DIR / "tiffen_segmenter_best.pth"
 
 BENCHMARK_DIR = BASE_DIR / "benchmark"
 BENCHMARK_IMAGES_DIR = BENCHMARK_DIR / "images"
 CSV_BENCHMARK_LOG_PATH = BENCHMARK_DIR / "benchmark_log.csv"
 JSON_BENCHMARK_BEST_CONFIG_PATH = BENCHMARK_DIR / "benchmark_results.json"
 
-DATASET_DIR = IMAGES_DIR / "dataset"
-DATASET_IMAGES_DIR = DATASET_DIR / "images"
-DATASET_MASK_DIR = DATASET_DIR / "mask"
+DATASET_DIR = DESKTOP_DIR / "dataset"
+DATASET_TRAIN_IMAGES_DIR = DATASET_DIR / "train_images"
+DATASET_TRAIN_MASK_DIR = DATASET_DIR / "train_masks"
+DATASET_VAL_IMAGES_DIR = DATASET_DIR / "val_images"
+DATASET_VAL_MASK_DIR = DATASET_DIR / "val_masks"
+DATASET_TEST_IMAGES_DIR = DATASET_DIR / "test_images"
+DATASET_TEST_MASK_DIR = DATASET_DIR / "test_masks"
 
 CONSERVATORIO_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio")
-PROVA_DIR = Path(r"C:\Users\andre\Desktop\Conservatorio")
+PROVA_DIR = DESKTOP_DIR / "Conservatorio"
