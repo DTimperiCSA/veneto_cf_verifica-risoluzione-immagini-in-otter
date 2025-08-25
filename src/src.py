@@ -1,115 +1,103 @@
-import torch
+import os
+from pathlib import Path
 import cv2
 import numpy as np
-from pathlib import Path
-from PIL import Image
+import torch
+import torch.nn.functional as F
 from torchvision import transforms
-from src.segmentation.unet import UNet   # importa la tua classe definita in unet.py
+from PIL import Image
 
+from src.segmentation.unet import UNet
+from src.paths import *
 
-# =====================================================
-# Carica modello UNet
-# =====================================================
-def load_unet_model(model_path, device="cuda"):
-    model = UNet(n_channels=3, n_classes=1).to(device)
-    state = torch.load(model_path, map_location=device)
-    model.load_state_dict(state)
-    model.eval()
-    return model
+# ========= CONFIG =========
+INPUT_FOLDER = Path(CONSERVATORIO_DIR / "B001")
+OUTPUT_MASKS = Path(OUTPUT_TMP_DIR / "unet_results" / "masks")
+OUTPUT_BBOX = Path(OUTPUT_TMP_DIR / "unet_results" / "bbox")
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+THRESHOLD = 0.5  # soglia per binarizzare la maschera
 
+OUTPUT_MASKS.mkdir(parents=True, exist_ok=True)
+OUTPUT_BBOX.mkdir(parents=True, exist_ok=True)
 
-# =====================================================
-# Preprocessing + Segmentazione
-# =====================================================
+# ========= MODEL =========
+# Assumo che tu abbia definito o caricato un modello UNet
+# Esempio generico:
+# model = UNet(n_channels=3, n_classes=1)
+# model.load_state_dict(torch.load("unet.pth"))
+# model.to(DEVICE).eval()
+model = UNet(n_channels=3, n_classes=1)
+model.load_state_dict(torch.load(SAVE_PATH))
+model.to(DEVICE).eval()
+
+# Preprocessing immagini
 transform = transforms.Compose([
-    transforms.Resize((256, 256)),   # adattare alla dimensione usata nel training
-    transforms.ToTensor()
+    transforms.ToTensor(),  # converte in tensor [0,1]
 ])
 
-def segment_image(model, img_pil, device="cuda"):
-    orig_w, orig_h = img_pil.size
-    x = transform(img_pil).unsqueeze(0).to(device)
+VALID_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+
+def is_valid_image_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in VALID_EXTS
+
+
+def predict_mask(image_path: Path):
+    img = Image.open(image_path).convert("RGB")
+    tensor = transform(img).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
-        pred = model(x)
+        pred = model(tensor)
+        pred = torch.sigmoid(pred)
+        pred = F.interpolate(pred, size=img.size[::-1], mode="bilinear", align_corners=False)
+        pred = pred.squeeze().cpu().numpy()
 
-    mask = pred.squeeze().cpu().numpy()
-    mask = (mask > 0.5).astype(np.uint8)
+    # Binarizza la maschera
+    mask = (pred > THRESHOLD).astype(np.uint8) * 255
+    return np.array(img), mask
 
-    # 🔹 Riporta la maschera alla dimensione originale
-    mask_resized = cv2.resize(mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-    return mask_resized
-
-
-def clean_mask(mask):
-    """Applica morfologia per rimuovere rumore"""
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    return mask
-
-
-def get_bounding_box(mask):
+def get_bbox_from_mask(mask: np.ndarray):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
+    # Trova il contorno più grande
     c = max(contours, key=cv2.contourArea)
-    return cv2.boundingRect(c)  # (x,y,w,h)
+    x, y, w, h = cv2.boundingRect(c)
+    return (x, y, w, h)
+
+def process_folder(folder: Path):
+    for img_path in folder.rglob("*"):
+        if not is_valid_image_file(img_path):
+            continue
 
 
-# =====================================================
-# Main test
-# =====================================================
+        try:
+            image, mask = predict_mask(img_path)
 
+            # Salva maschera binaria
+            mask_out_path = OUTPUT_MASKS / f"{img_path.stem}_mask.png"
+            cv2.imwrite(str(mask_out_path), mask)
 
+            # Disegna BBOX
+            bbox_img = image.copy()
+            bbox = get_bbox_from_mask(mask)
+            if bbox:
+                x, y, w, h = bbox
+                cv2.rectangle(
+                    bbox_img,
+                    (x, y),
+                    (x + w, y + h),
+                    (0, 0, 255),  # rosso acceso
+                    thickness=6    # molto spessa
+                )
 
-# ------------------------------
-# Main test
-# ------------------------------
+            # Salva immagine con BBOX
+            bbox_out_path = OUTPUT_BBOX / f"{img_path.stem}_bbox.png"
+            cv2.imwrite(str(bbox_out_path), cv2.cvtColor(bbox_img, cv2.COLOR_RGB2BGR))
+
+            print(f"✔ Processata {img_path.name}")
+        except Exception as e:
+            print(f"Errore con {img_path.name}: {e}")
+
+# ========= RUN =========
 if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    from src.paths import *
-
-    model_path = SAVE_PATH
-    input_root = CONSERVATORIO_DIR / "B001"  # root folder with subfolders
-    output_dir = OUTPUT_TMP_DIR / "unet_results"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Carica modello
-    model = load_unet_model(model_path, device)
-
-    # Trova tutte le immagini in input_root (ricorsivamente)
-    exts = {".tif", ".tiff", ".jpg", ".jpeg", ".png"}
-    image_files = [p for p in input_root.rglob("*") if p.suffix.lower() in exts]
-
-    print(f"🔍 Trovate {len(image_files)} immagini in {input_root} (incluse sottocartelle)")
-
-    for img_path in image_files:
-        print(f"➡️ Elaboro: {img_path}")
-        img_pil = Image.open(img_path).convert("RGB")
-        img_cv = cv2.imread(str(img_path))
-
-        # Segmenta
-        mask = segment_image(model, img_pil, device)
-        mask = clean_mask(mask)
-
-        # Salva maschera (mantieni struttura cartelle)
-        rel_path = img_path.relative_to(input_root)
-        out_mask_path = output_dir / rel_path
-        out_mask_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(out_mask_path), (mask * 255).astype(np.uint8))
-
-        # Trova bounding box
-        bbox = get_bounding_box(mask)
-        if bbox:
-            x, y, w, h = bbox
-            cv2.rectangle(img_cv, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(img_cv, "UNet", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-        # Salva immagine con box (mantieni struttura cartelle)
-        out_img_path = output_dir / rel_path
-        out_img_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(out_img_path), img_cv)
-
-    print(f"\n✅ Elaborazione completata. Risultati salvati in: {output_dir}")
+    process_folder(INPUT_FOLDER)
