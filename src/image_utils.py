@@ -5,6 +5,7 @@ import csv
 import cv2
 import shutil
 import time
+import torch
 
 from PIL import Image
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Tuple
 from src.paths import *
 from src.config import *
 from src.image_utils import *
+from src.segmentation.unet import UNet
 
 COL_KP = (255, 0, 0)
 
@@ -166,53 +168,76 @@ def find_chromatic_band_in_folder(
     else:
         return None
 
-def measure_chromatic_band_dimension(path_input: Path):
-    img = safe_imread(path_input)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-    lower_gray = np.array([0, 0, 40])
-    upper_gray = np.array([180, 50, 100])
-    mask = cv2.inRange(hsv, lower_gray, upper_gray)
+MODEL = None  # global cached model
 
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def load_unet(model_path: Path, model_class):
+    global MODEL
+    if MODEL is None:  # lazy load only once
+        model = model_class().to(DEVICE)
+        model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+        model.eval()
+        MODEL = model
+    return MODEL
 
-    best_contour = None
-    best_area = 0
-    best_rect = None
 
-    for c in contours:
-        if cv2.arcLength(c, True) < 200:
-            continue
+def measure_chromatic_band_dimension(path_input: Path, input_size=(256, 256)):
+    """Return (long_side, short_side) in pixels using UNet segmentation and save visualization."""
+    global MODEL
 
-        rect = cv2.minAreaRect(c)
-        (cx, cy), (w, h), angle = rect
-        area = w * h
+    if MODEL is None:
+        # You can put SAVE_PATH in config.py
+        MODEL = load_unet(SAVE_PATH, UNet)
 
-        if area < 1000:
-            continue
-
-        aspect_ratio = max(w, h) / min(w, h)
-
-        if aspect_ratio < 3:
-            continue
-
-        if area > best_area:
-            best_area = area
-            best_contour = c
-            best_rect = rect
-
-    if best_contour is not None:
-        box = cv2.boxPoints(best_rect)
-        box = box.astype(int)
-        cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
-
-        w, h = best_rect[1]
-        long_side = max(w, h)
-        short_side = min(w, h)
-        return (long_side, short_side)
-    else:
-        print(f"⚠️ Nessun righello Tiffen identificato in {path_input}.")
+    # --- Load image ---
+    img = cv2.imread(str(path_input))
+    if img is None:
+        print(f"⚠️ Could not read {path_input}")
         return None
+    orig_h, orig_w = img.shape[:2]
+
+    # --- Preprocess ---
+    img_resized = cv2.resize(img, input_size)
+    img_tensor = torch.from_numpy(img_resized).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+    img_tensor = img_tensor.to(DEVICE)
+
+    # --- Inference ---
+    with torch.no_grad():
+        pred = MODEL(img_tensor)
+        pred = torch.sigmoid(pred)
+        mask = (pred > 0.5).float().cpu().numpy()[0, 0]
+
+    mask = cv2.resize(mask.astype(np.uint8), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+
+    # --- Get bounding box ---
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        print(f"⚠️ No Tiffen ruler found in {path_input}.")
+        return None
+
+    c = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(c)
+    (cx, cy), (w, h), angle = rect
+    box = cv2.boxPoints(rect).astype(int)
+
+    # --- Save visualization ---
+    debug = img.copy()
+    # overlay mask
+    colored_mask = cv2.applyColorMap((mask * 255).astype(np.uint8), cv2.COLORMAP_JET)
+    overlay = cv2.addWeighted(debug, 0.7, colored_mask, 0.3, 0)
+    # draw bounding box
+    cv2.drawContours(overlay, [box], 0, (0, 255, 0), 2)
+
+    out_dir = OUTPUT_TMP_DIR / "segmentation_results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = OUTPUT_TMP_DIR / f"{path_input.stem}_segmented.png"
+    cv2.imwrite(str(out_path), overlay)
+
+    print(f"💾 Saved segmentation result: {out_path}")
+
+    return (max(w, h), min(w, h))
+
     
 def binaryize_image(image_path: Path, threshold: int = 50) -> Path | None:
     valid, msg = is_valid_image_file(image_path)
