@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: my-project
+Version: 0.1.0
+Summary: PyTorch CUDA project
+Requires-Python: ==3.12.*
+Requires-Dist: torch==2.4.1+cu124
+Requires-Dist: torchvision==0.19.1+cu124
+Requires-Dist: torchaudio==2.4.1+cu124
+Requires-Dist: numpy>=2.3.2
+Requires-Dist: pillow>=11.3.0
+Requires-Dist: tqdm>=4.67.1
+Requires-Dist: cryptography>=45.0.5
+Requires-Dist: accelerate>=1.9.0
+Requires-Dist: optimum[onnxruntime-gpu]>=1.26.1
+Requires-Dist: onnxruntime-gpu>=1.22.0
+Requires-Dist: more-itertools>=10.7.0
+Requires-Dist: opencv-python>=4.11.0.86
+Requires-Dist: matplotlib>=3.10.5
+Requires-Dist: albumentations>=2.0.8

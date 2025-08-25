@@ -1,0 +1,14 @@
+torch==2.4.1+cu124
+torchvision==0.19.1+cu124
+torchaudio==2.4.1+cu124
+numpy>=2.3.2
+pillow>=11.3.0
+tqdm>=4.67.1
+cryptography>=45.0.5
+accelerate>=1.9.0
+optimum[onnxruntime-gpu]>=1.26.1
+onnxruntime-gpu>=1.22.0
+more-itertools>=10.7.0
+opencv-python>=4.11.0.86
+matplotlib>=3.10.5
+albumentations>=2.0.8
