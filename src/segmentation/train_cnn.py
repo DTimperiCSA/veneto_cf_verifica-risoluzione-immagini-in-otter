@@ -1,5 +1,3 @@
-# src/segmentation/train_cnn.py
-
 import os
 from pathlib import Path
 from typing import Tuple
@@ -143,28 +141,40 @@ def dice_score(logits: torch.Tensor, targets: torch.Tensor, threshold: float = 0
     return dice.mean().item()
 
 
+@torch.no_grad()
+def pixel_accuracy(logits: torch.Tensor, targets: torch.Tensor, threshold: float = 0.5) -> float:
+    probs = torch.sigmoid(logits)
+    preds = (probs > threshold).float()
+    if targets.ndim == 3:
+        targets = targets.unsqueeze(1)
+    correct = (preds == targets).float().sum()
+    total = torch.numel(preds)
+    return (correct / total).item()
+
+
 # =========================
 # Transforms & DataLoader
 # =========================
 def get_latest_checkpoint(checkpoint_dir: Path) -> Path | None:
-    checkpoints = sorted(checkpoint_dir.glob("checkpoint_epoch_*.pth"), key=lambda x: int(x.stem.split("_")[-1]))
+    checkpoints = sorted(checkpoint_dir.glob("checkpoint_epoch_*.pth"),
+                         key=lambda x: int(x.stem.split("_")[-1]))
     return checkpoints[-1] if checkpoints else None
 
 
-def get_transforms(img_size=256):
+def get_transforms(img_size=480):
     train_tf = A.Compose([
         A.Resize(img_size, img_size),
-        A.RandomResizedCrop(size=(256, 256), scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
+        A.RandomResizedCrop(size=(img_size, img_size), scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        A.Affine(translate_percent=(0.1, 0.1), scale=(0.9, 1.1), rotate=(-15, 15)),  # <- comma added
+        A.Affine(translate_percent=(0.1, 0.1), scale=(0.9, 1.1), rotate=(-15, 15)),
         A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ])
     val_tf = A.Compose([
-        A.Resize(height=256, width=256),
+        A.Resize(height=img_size, width=img_size),
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2()
     ])
@@ -202,11 +212,13 @@ def train_model(resume_checkpoint: Path = None):
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     criterion = DiceBCELoss()
     use_amp = device.type == "cuda"
-    scaler = torch.amp.GradScaler(enabled=use_amp)  # no device_type needed
+    scaler = torch.amp.GradScaler(enabled=use_amp)
 
     start_epoch = 1
     best_val_loss = float("inf")
+    best_val_dice = 0.0   # <--- aggiunto
     epochs_no_improve = 0
+
 
     # Automatically resume from latest checkpoint if available
     latest_ckpt = get_latest_checkpoint(CHECKPOINT_DIR)
@@ -215,7 +227,6 @@ def train_model(resume_checkpoint: Path = None):
         print(f"🔄 Found latest checkpoint: {resume_checkpoint}")
     else:
         resume_checkpoint = None
-
 
     SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -228,7 +239,6 @@ def train_model(resume_checkpoint: Path = None):
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['best_val_loss']
         print(f"🔄 Resuming training from epoch {start_epoch}")
-
 
     for epoch in range(start_epoch, MAX_EPOCHS + 1):
         # ======= Train =======
@@ -255,6 +265,7 @@ def train_model(resume_checkpoint: Path = None):
         val_loss_accum = 0.0
         val_iou_accum = 0.0
         val_dice_accum = 0.0
+        val_acc_accum = 0.0
         with torch.no_grad():
             for imgs, masks in tqdm(val_loader, desc=f"Epoch {epoch}/{MAX_EPOCHS} [val]"):
                 imgs, masks = imgs.to(device, non_blocking=True), masks.to(device, non_blocking=True)
@@ -264,25 +275,36 @@ def train_model(resume_checkpoint: Path = None):
                 val_loss_accum += loss.item()
                 val_iou_accum += iou_score(logits, masks)
                 val_dice_accum += dice_score(logits, masks)
+                val_acc_accum += pixel_accuracy(logits, masks)
 
         val_loss = val_loss_accum / max(1, len(val_loader))
         val_iou = val_iou_accum / max(1, len(val_loader))
         val_dice = val_dice_accum / max(1, len(val_loader))
+        val_acc = val_acc_accum / max(1, len(val_loader))
         scheduler.step(val_loss)
 
-        print(f"Epoch {epoch:02d} | train_loss: {train_loss:.4f} | val_loss: {val_loss:.4f} | val_iou: {val_iou:.4f} | val_dice: {val_dice:.4f} | lr: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"Epoch {epoch:02d} | train_loss: {train_loss:.4f} | "
+              f"val_loss: {val_loss:.4f} | val_iou: {val_iou:.4f} | "
+              f"val_dice: {val_dice:.4f} | val_acc: {val_acc:.4f} | "
+              f"lr: {optimizer.param_groups[0]['lr']:.2e}")
 
         # ======= Early Stopping & Best Model =======
+        # Best model salvato in base al val_dice
+        if val_dice > best_val_dice:
+            best_val_dice = val_dice
+            torch.save(model.state_dict(), SAVE_PATH)
+            print(f"💾  Best model aggiornato → {SAVE_PATH} (val_dice={val_dice:.4f})")
+
+        # Early stopping invece basato su val_loss
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), SAVE_PATH)
-            print(f"💾  Best model aggiornato → {SAVE_PATH} (val_loss={val_loss:.4f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= PATIENCE:
                 print("⏹ Early stopping attivato.")
                 break
+
 
         # ======= Checkpoint =======
         if epoch % CHECKPOINT_INTERVAL == 0:
