@@ -69,11 +69,11 @@ def get_bounding_box(mask):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model_path = Path(
-        r"C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\model\tiffen_segmenter_best.pth"
-    )
-    input_root = Path(r"C:\Users\andre\Desktop\test_all_mask")   # root folder with subfolders
-    output_dir = Path(r"C:\Users\andre\Desktop\veneto_cf_verifica-risoluzione-immagini-in-otter\results")
+    from src.paths import *
+
+    model_path = SAVE_PATH
+    input_root = CONSERVATORIO_DIR / "B001"  # root folder with subfolders
+    output_dir = OUTPUT_TMP_DIR / "unet_results"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Carica modello

@@ -26,7 +26,7 @@ from src.paths import *
 SRC_IMAGES = Path(r"C:\Users\andre\Desktop\data\images")               # with masks
 SRC_MASKS = Path(r"C:\Users\andre\Desktop\data\mask")
 SRC_NO_MASK = Path(r"C:\Users\andre\Desktop\data\images_no_mask")  # no masks
-SPLIT_DIR = Path(r"C:\Users\andre\Desktop\dataset")
+SPLIT_DIR = DATASET_DIR
 
 TRAIN_RATIO = 0.7
 VAL_RATIO = 0.2
