@@ -70,7 +70,7 @@ def benchmark():
             writer.writerow(["timestamp", "device", "processes", "threads", "total_time", "avg_time"])
 
 
-    images = sorted(count_all_images(INPUT_IMAGES_DIR), key=lambda p: p.stat().st_size, reverse=True)[:5]
+    images = sorted(count_all_images(BENCHMARK_IMAGES_DIR), key=lambda p: p.stat().st_size, reverse=True)[:5]
     if not images:
         print("⚠️ Nessuna immagine trovata per benchmark.")
         return

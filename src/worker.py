@@ -52,5 +52,6 @@ class ImageWorker:
             if not validate_image_with_logging(final_output_path, "validate_downscale", self.logger):
                 return
 
+
         except Exception as e:
             self.logger.log_crash(error=f"Unexpected error with {image_path}: {e}", full_path=image_path)
