@@ -1,0 +1,16 @@
+__init__
+brute_force
+compare
+config
+image_processing
+image_utils
+main
+methods
+paths
+prova
+segmentation
+sorter
+src
+tmp
+utils
+worker
