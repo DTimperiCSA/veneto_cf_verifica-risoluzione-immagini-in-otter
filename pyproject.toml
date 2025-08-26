@@ -1,14 +1,33 @@
 [project]
+name = "veneto_cf_verifica"
 version = "0.1.0"
-description = "Default template for PDM package"
-authors = [
-    {name = "DTimperi - CSA", email = "d.timperi@csadocuments.it"},
-]
-dependencies = ["torch>=2.7.1", "numpy>=2.3.2", "pillow>=11.3.0", "tqdm>=4.67.1", "cryptography>=45.0.5", "accelerate>=1.9.0", "optimum[onnxruntime-gpu]>=1.26.1", "onnxruntime-gpu>=1.22.0", "more-itertools>=10.7.0", "opencv-python>=4.11.0.86", "matplotlib>=3.10.5", "torchvision>=0.23.0", "albumentations>=2.0.8"]
-requires-python = "==3.13.*"
-readme = "README.md"
-license = {text = "MIT"}
+description = "PyTorch CUDA project with RTX 50xx support"
+requires-python = "==3.12.*"
+dependencies = [
+    # PyTorch nightly packages
+    "torch",
+    "torchvision",
+    "torchaudio",
 
+    # Other stable dependencies
+    "numpy>=2.3.2",
+    "pillow>=11.3.0",
+    "tqdm>=4.67.1",
+    "cryptography>=45.0.5",
+    "accelerate>=1.9.0",
+    "optimum[onnxruntime-gpu]>=1.26.1",
+    "onnxruntime-gpu>=1.22.0",
+    "more-itertools>=10.7.0",
+    "opencv-python>=4.11.0.86",
+    "matplotlib>=3.10.5",
+    "albumentations>=2.0.8",
+]
 
 [tool.pdm]
 distribution = true
+
+# Nightly PyTorch CUDA 12.4 source
+[[tool.pdm.source]]
+name = "pytorch-nightly-cu124"
+url = "https://download.pytorch.org/whl/nightly/cu124"
+verify_ssl = true
