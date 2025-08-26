@@ -1,7 +1,10 @@
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+CONSERVATORIO_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio")
 DESKTOP_DIR = Path.home() / "Desktop"
+REPO_DIR = DESKTOP_DIR / "github" / "Davide Timperi - Conservatorio Venezia"
+
 
 IMAGES_DIR = BASE_DIR / "images"
 INPUT_IMAGES_DIR = DESKTOP_DIR / "B001"
@@ -20,10 +23,11 @@ SAVE_PATH = MODEL_DIR / "tiffen_segmenter_best.pth"
 
 BENCHMARK_DIR = BASE_DIR / "benchmark"
 BENCHMARK_IMAGES_DIR = BENCHMARK_DIR / "images"
+BENCHMARK_INPUT_IMAGES_DIR = CONSERVATORIO_DIR / "B001" / "B001.001"
 CSV_BENCHMARK_LOG_PATH = BENCHMARK_DIR / "benchmark_log.csv"
 JSON_BENCHMARK_BEST_CONFIG_PATH = BENCHMARK_DIR / "benchmark_results.json"
 
-DATASET_DIR = DESKTOP_DIR / "dataset"
+DATASET_DIR = REPO_DIR / "dataset"
 DATASET_TRAIN_IMAGES_DIR = DATASET_DIR / "train_images"
 DATASET_TRAIN_MASK_DIR = DATASET_DIR / "train_masks"
 DATASET_VAL_IMAGES_DIR = DATASET_DIR / "val_images"
@@ -31,5 +35,10 @@ DATASET_VAL_MASK_DIR = DATASET_DIR / "val_masks"
 DATASET_TEST_IMAGES_DIR = DATASET_DIR / "test_images"
 DATASET_TEST_MASK_DIR = DATASET_DIR / "test_masks"
 
-CONSERVATORIO_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio")
+DATA_TO_SPLIT_DIR = REPO_DIR / "data"
 PROVA_DIR = DESKTOP_DIR / "Conservatorio"
+
+SRC_IMAGES = DATA_TO_SPLIT_DIR / "images"               # with masks
+SRC_MASKS = DATA_TO_SPLIT_DIR / "masks"
+SRC_NO_MASK = DATA_TO_SPLIT_DIR / "images_no_mask"  # no masks
+SPLIT_DIR = DATASET_DIR
