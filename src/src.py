@@ -1,46 +1,51 @@
-import os
-from pathlib import Path
 import cv2
 import numpy as np
+from pathlib import Path
+from PIL import Image
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from PIL import Image
 
 from src.segmentation.unet import UNet
 from src.paths import *
 
 # ========= CONFIG =========
 INPUT_FOLDER = Path(CONSERVATORIO_DIR / "B001")
-OUTPUT_MASKS = Path(OUTPUT_TMP_DIR / "unet_results" / "masks")
-OUTPUT_BBOX = Path(OUTPUT_TMP_DIR / "unet_results" / "bbox")
+OUTPUT_DIR = Path(OUTPUT_TMP_DIR / "unet_segmentation")
+OUTPUT_MASKS = OUTPUT_DIR / "masks"
+OUTPUT_BBOX = OUTPUT_DIR / "bbox"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-THRESHOLD = 0.5  # soglia per binarizzare la maschera
+THRESHOLD = 0.5
 
 OUTPUT_MASKS.mkdir(parents=True, exist_ok=True)
 OUTPUT_BBOX.mkdir(parents=True, exist_ok=True)
 
+VALID_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+
 # ========= MODEL =========
-# Assumo che tu abbia definito o caricato un modello UNet
-# Esempio generico:
-# model = UNet(n_channels=3, n_classes=1)
-# model.load_state_dict(torch.load("unet.pth"))
-# model.to(DEVICE).eval()
 model = UNet(n_channels=3, n_classes=1)
 model.load_state_dict(torch.load(SAVE_PATH))
 model.to(DEVICE).eval()
 
-# Preprocessing immagini
 transform = transforms.Compose([
-    transforms.ToTensor(),  # converte in tensor [0,1]
+    transforms.ToTensor(),
 ])
 
-VALID_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+# ========= TEMPLATE MATCHING =========
+template = cv2.imread(str(TEMPLATE_IMG_PATH))
+template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+template_w, template_h = template_gray.shape[::-1]
 
-def is_valid_image_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in VALID_EXTS
+def contains_chromatic_band(image_path: Path, threshold: float = 0.7) -> bool:
+    img = cv2.imread(str(image_path))
+    if img is None:
+        return False
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+    return max_val >= threshold
 
-
+# ========= PREDICT MASK =========
 def predict_mask(image_path: Path):
     img = Image.open(image_path).convert("RGB")
     tensor = transform(img).unsqueeze(0).to(DEVICE)
@@ -51,7 +56,6 @@ def predict_mask(image_path: Path):
         pred = F.interpolate(pred, size=img.size[::-1], mode="bilinear", align_corners=False)
         pred = pred.squeeze().cpu().numpy()
 
-    # Binarizza la maschera
     mask = (pred > THRESHOLD).astype(np.uint8) * 255
     return np.array(img), mask
 
@@ -62,35 +66,29 @@ def get_bbox_from_mask(mask: np.ndarray):
     # Trova il contorno più grande
     c = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(c)
-    return (x, y, w, h)
+    return x, y, w, h
 
+# ========= PROCESS FOLDER =========
 def process_folder(folder: Path):
     for img_path in folder.rglob("*"):
-        if not is_valid_image_file(img_path):
+        if not img_path.is_file() or img_path.suffix.lower() not in VALID_EXTS:
             continue
 
-
         try:
+            if not contains_chromatic_band(img_path):                
+                continue
+
             image, mask = predict_mask(img_path)
 
-            # Salva maschera binaria
             mask_out_path = OUTPUT_MASKS / f"{img_path.stem}_mask.png"
             cv2.imwrite(str(mask_out_path), mask)
 
-            # Disegna BBOX
             bbox_img = image.copy()
             bbox = get_bbox_from_mask(mask)
             if bbox:
                 x, y, w, h = bbox
-                cv2.rectangle(
-                    bbox_img,
-                    (x, y),
-                    (x + w, y + h),
-                    (0, 0, 255),  # rosso acceso
-                    thickness=6    # molto spessa
-                )
+                cv2.rectangle(bbox_img, (x, y), (x + w, y + h), (0, 0, 255), thickness=6)
 
-            # Salva immagine con BBOX
             bbox_out_path = OUTPUT_BBOX / f"{img_path.stem}_bbox.png"
             cv2.imwrite(str(bbox_out_path), cv2.cvtColor(bbox_img, cv2.COLOR_RGB2BGR))
 
@@ -99,5 +97,50 @@ def process_folder(folder: Path):
             print(f"Errore con {img_path.name}: {e}")
 
 # ========= RUN =========
+# ========= RUN =========
 if __name__ == "__main__":
-    process_folder(INPUT_FOLDER)
+    MAX_IMAGES = 100
+    processed_count = 0
+
+    # Naviga tutte le sottocartelle e prende tutti i file immagine
+    all_images = [p for p in INPUT_FOLDER.rglob("*") if p.suffix.lower() in VALID_EXTS]
+    print(f"[DEBUG] Totale immagini trovate: {len(all_images)}")
+
+    all_images = all_images[:100]
+
+    for img_path in all_images:
+        if processed_count >= MAX_IMAGES:
+            print(f"[DEBUG] Raggiunto limite di {MAX_IMAGES} immagini. Stop.")
+            break
+
+        print(f"[DEBUG] Elaborando: {img_path}")
+
+        try:
+            image, mask = predict_mask(img_path)
+            print(f"[DEBUG] Maschera predetta. Shape immagine: {image.shape}, Shape mask: {mask.shape}")
+
+            # salva maschera
+            mask_out_path = OUTPUT_MASKS / f"{img_path.stem}_mask.png"
+            cv2.imwrite(str(mask_out_path), mask)
+            print(f"[DEBUG] Maschera salvata in: {mask_out_path}")
+
+            # salva bounding box
+            bbox_img = image.copy()
+            bbox = get_bbox_from_mask(mask)
+            if bbox:
+                x, y, w, h = bbox
+                cv2.rectangle(bbox_img, (x, y), (x + w, y + h), (0, 0, 255), thickness=6)
+                print(f"[DEBUG] Bounding box: x={x}, y={y}, w={w}, h={h}")
+            else:
+                print(f"[DEBUG] Nessun oggetto trovato nella maschera.")
+
+            bbox_out_path = OUTPUT_BBOX / f"{img_path.stem}_bbox.png"
+            cv2.imwrite(str(bbox_out_path), cv2.cvtColor(bbox_img, cv2.COLOR_RGB2BGR))
+            print(f"[DEBUG] Immagine con bbox salvata in: {bbox_out_path}")
+
+            print(f"✔ Processata {img_path.name}")
+            processed_count += 1
+
+        except Exception as e:
+            print(f"[ERROR] Errore con {img_path.name}: {e}")
+
