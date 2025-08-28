@@ -182,13 +182,8 @@ def load_unet(model_path: Path, model_class):
     return MODEL
 
 
-def measure_chromatic_band_dimension(path_input: Path, input_size=(256, 256)):
+def measure_chromatic_band_dimension(path_input: Path, model, input_size=(256, 256)):
     """Return (long_side, short_side) in pixels using UNet segmentation and save visualization."""
-    global MODEL
-
-    if MODEL is None:
-        # You can put SAVE_PATH in config.py
-        MODEL = load_unet(SAVE_PATH, UNet)
 
     # --- Load image ---
     img = cv2.imread(str(path_input))
@@ -204,7 +199,7 @@ def measure_chromatic_band_dimension(path_input: Path, input_size=(256, 256)):
 
     # --- Inference ---
     with torch.no_grad():
-        pred = MODEL(img_tensor)
+        pred = model(img_tensor)
         pred = torch.sigmoid(pred)
         mask = (pred > 0.5).float().cpu().numpy()[0, 0]
 
@@ -260,10 +255,10 @@ def binaryize_image(image_path: Path, threshold: int = 50) -> Path | None:
     cv2.imwrite(str(dest_path), binary)
     return dest_path
 
-def estimate_ppi_from_chromatic_band(chromatic_band_path: Path) -> int | None:
+def estimate_ppi_from_chromatic_band(chromatic_band_path: Path, model) -> int | None:
     chromatic_band_path = Path(chromatic_band_path)
 
-    chromatic_band_dim_px = measure_chromatic_band_dimension(chromatic_band_path)
+    chromatic_band_dim_px = measure_chromatic_band_dimension(chromatic_band_path, model)
     if not chromatic_band_dim_px:
         return None
     

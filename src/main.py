@@ -24,6 +24,21 @@ from benchmark.benchmark import benchmark
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
+UNET = None
+
+# ---------- Load UNET model ----------
+model = UNet(in_channels=3, out_channels=3)
+checkpoint = torch.load(SAVE_PATH, map_location=DEVICE)
+
+# load weights properly
+if "model_state_dict" in checkpoint:
+    model.load_state_dict(checkpoint["model_state_dict"])
+else:
+    model.load_state_dict(checkpoint)
+
+# move to GPU (or CPU)
+UNET = model.to(DEVICE)
+
 
 # ---------- Process batch ----------
 def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
@@ -112,11 +127,14 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             logger.log_crash(f"Can't find a chromatic band: {e}", full_path=str(folder))
             continue
 
-        ppi = estimate_ppi_from_chromatic_band(chromatic_band_path)
+        ppi = estimate_ppi_from_chromatic_band(chromatic_band_path, UNET)
         if not ppi:
             logger.log(folder.name, "estimate_ppi", success=False, error="Impossibile stimare PPI", full_path=str(folder))
             print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
             continue
+            
+        print(f"   - PPI stimati: {ppi}")
+        exit(1)
 
         # --- multiprocessing chunking and processing ---
         chunk_size = ceil(len(images) / processes)
