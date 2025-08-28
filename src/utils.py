@@ -43,7 +43,7 @@ def numpy_to_image(array: np.ndarray) -> Image.Image:
     return Image.fromarray(array)
 
 
-def find_output_dir() -> tuple[Path, Path]:
+def find_output_dir(rel_folder) -> tuple[Path, Path]:
     """
     Determine the appropriate super-resolution output directory based on the scale factor.
     
@@ -53,14 +53,17 @@ def find_output_dir() -> tuple[Path, Path]:
     Raises:
         ValueError: If scale factor is unsupported.
     """
+
+    rel_folder = Path(rel_folder)
+
     if 2 <= SUPER_RESOLUTION_PAR <= 4:
         final_super_res_suffix = f"x{SUPER_RESOLUTION_PAR}"
     else:
         raise ValueError("SUPER_RESOLUTION_PAR must be 2, 3, or 4.")
 
     # Dynamically construct directories
-    super_res_dir = Path(OUTPUT_IMAGES_DIR) / f"sr_{final_super_res_suffix}"
-    downscaling_dir = Path(OUTPUT_IMAGES_DIR) / f"downscaled_{final_super_res_suffix}"
+    super_res_dir = Path(OUTPUT_IMAGES_DIR) / f"sr_{final_super_res_suffix}" / rel_folder
+    downscaling_dir = Path(OUTPUT_IMAGES_DIR) / f"downscaled_{final_super_res_suffix}" / rel_folder
 
 
     # Create directories if they don’t exist
