@@ -289,10 +289,6 @@ def measure_chromatic_band_dimension(path_input: Path, model, input_size=(256, 2
     debug = cv2.drawContours(img.copy(), [box], 0, (0, 255, 0), 2)
     cv2.imwrite(str(out_path), debug)
 
-    print("🔍 minAreaRect w,h (in px):", w, h)
-    print("   orig image size:", orig_w, orig_h)
-
-
     return (max(w, h), min(w, h))
 
 # ============================================================================
@@ -323,7 +319,7 @@ def estimate_ppi_from_chromatic_band(chromatic_band_path: Path, model) -> int | 
         image, mask = predict_mask(chromatic_band_path, model)
 
         # Save mask
-        mask_out_path = OUTPUT_TMP_DIR / "segmented_masks" / f"{chromatic_band_path}_mask.png"
+        mask_out_path = OUTPUT_TMP_DIR / "segmented_masks" / f"{chromatic_band_path.stem}_mask.png"
         cv2.imwrite(str(mask_out_path), mask)
 
         # Bounding box

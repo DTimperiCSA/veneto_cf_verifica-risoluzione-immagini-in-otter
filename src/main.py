@@ -26,8 +26,7 @@ from benchmark.benchmark import benchmark
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
 UNET = None
-
-
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------- Process batch ----------
 def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
@@ -117,10 +116,10 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         # compute the corresponding downscaling folder
 
         relative_folder = folder.relative_to(CONSERVATORIO_DIR)
-        super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
+        super_resolution_dir, downscaling_dir = find_output_dir()
 
         # check if *all* images exist in target folder
-        all_exist = all((downscaling_dir / img.name).exists() for img in images)
+        all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images)
 
         if all_exist:
             logger.log(folder.name, "all_images_to_process", success=False, error="Tutte le immagini sono già state prrocessate", full_path=str(folder))
@@ -205,8 +204,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
     logger.sort_itslef()
 
-    exit(1)
-
 # ---------- Main ----------
 def main():
     if CSV_LOG_PATH.exists():
@@ -251,7 +248,7 @@ def main():
             tmp_dir = OUTPUT_TMP_DIR # or any directory you want to remove
             if tmp_dir.exists() and tmp_dir.is_dir():
                 print(f"🗑️ Pulizia della directory temporanea: {tmp_dir}")
-                #shutil.rmtree(tmp_dir, ignore_errors=True)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     logger.stop()
 
