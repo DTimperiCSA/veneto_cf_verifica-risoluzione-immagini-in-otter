@@ -20,7 +20,6 @@ from src.image_processing import *
 from src.worker import ImageWorker
 from src.segmentation.unet import UNet
 from logs.logger import CSVLogger
-from logs.logger_instance import *
 from model.SR_Script.super_resolution import SA_SuperResolution
 from benchmark.benchmark import benchmark
 
@@ -29,9 +28,11 @@ RETRY_DELAY = 5  # seconds
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------- Process batch ----------
-def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, progress_queue, ppi):
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
     from src.worker import ImageWorker
     from model.SR_Script.super_resolution import SA_SuperResolution
+
+    logger = CSVLogger(logger_path)
 
     model = SA_SuperResolution(
         models_dir=model_path,
@@ -41,7 +42,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         verbosity=False,
     )
 
-    worker = ImageWorker(super_resolution_dir, downscaling_dir, model, ppi)
+    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model, ppi)
     
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
@@ -58,7 +59,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
 
 
 # ---------- Standard processing ----------
-def run_standard_processing(processes, threads):
+def run_standard_processing(processes, threads, logger: CSVLogger):
     print("🔍 Caricamento modello di super-risoluzione (test iniziale)...")
     try:
         _ = SA_SuperResolution(
@@ -79,6 +80,8 @@ def run_standard_processing(processes, threads):
     total_error = 0
 
     for folder in CONSERVATORIO_DIR.rglob("*"):
+        print(f"📌 Analisi del percorso: {folder}")
+
         if not folder.is_dir():
             continue
 
@@ -89,9 +92,6 @@ def run_standard_processing(processes, threads):
             logger.log(folder.name, "no_images_to_process", success=False,
                     error="Nessuna immagine valida trovata", full_path=str(folder))
             continue
-
-        logger.log(folder.name, "folder_check", success=True,
-                error=f"{len(images_in_folder)} immagini valide trovate", full_path=str(folder))
 
         # --- check immagini già processate ---
         relative_folder = folder.relative_to(CONSERVATORIO_DIR)
@@ -109,18 +109,13 @@ def run_standard_processing(processes, threads):
                 logger.log(folder.name, "chromatic_band_search", success=False,
                         error="Nessuna banda cromatica trovata", full_path=str(folder))
                 continue
-            logger.log(chromatic_band_path.name, "chromatic_band_found", success=True,
-                    error=f"Banda cromatica trovata in {chromatic_band_path}", full_path=str(chromatic_band_path))
 
             # --- analisi banda cromatica ---
-            res = analyze_chromatic_band(chromatic_band_path)
+            res = analyze_chromatic_band(chromatic_band_path, logger)
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
                                 "Analisi banda cromatica fallita", str(chromatic_band_path))
                 continue
-            else:
-                logger.log(chromatic_band_path.name, "full_analysis", success=True,
-                        error="Analisi completata con successo", full_path=str(chromatic_band_path))
 
             # --- stima PPI ---
             ppi = res.get('ppi', None)
@@ -147,6 +142,7 @@ def run_standard_processing(processes, threads):
             super_resolution_dir=super_resolution_dir,
             downscaling_dir=downscaling_dir,
             model_path=SR_SCRIPT_MODEL_DIR,
+            logger_path=CSV_LOG_PATH,
             progress_queue=progress_queue,
             ppi=ppi
         )
@@ -192,9 +188,6 @@ def run_standard_processing(processes, threads):
         total_success += folder_success
         total_error += folder_error_count
 
-        logger.log(folder.name, "folder_summary", success=True,
-                error=f"Successi: {folder_success} | Errori: {folder_error_count}", full_path=str(folder))
-
     # --- riepilogo finale ---
     logger.sort_itslef()
 
@@ -209,7 +202,10 @@ def run_standard_processing(processes, threads):
 
 # ---------- Main ----------
 def main():
-    logger = init_logger(reset=True)
+    if CSV_LOG_PATH.exists():
+        print(f"📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
+        CSV_LOG_PATH.unlink()
+    logger = CSVLogger(CSV_LOG_PATH)
 
     # ---------- Check or run benchmark ----------
     if not JSON_BENCHMARK_BEST_CONFIG_PATH.exists():
@@ -229,7 +225,7 @@ def main():
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
-            run_standard_processing(processes, threads)
+            run_standard_processing(processes, threads, logger)
             print("✅ Elaborazione completata con successo.")
             break
         except KeyboardInterrupt:

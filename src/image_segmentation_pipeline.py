@@ -8,7 +8,6 @@ from torchvision import transforms
 from src.segmentation.unet import UNet
 from src.paths import *
 from src.utils import *
-from logs.logger_instance import *
 import time
 import shutil
 
@@ -23,8 +22,6 @@ COL_KP = (255, 0, 0)
 template = cv2.imread(str(TEMPLATE_IMG_PATH))
 template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 template_w, template_h = template_gray.shape[::-1]
-
-logger = get_logger()
 
 # ========= MODEL =========
 print("🔍 Caricamento modello UNet...")
@@ -44,7 +41,6 @@ try:
     # move to GPU (or CPU)
     model = model.to(DEVICE)
 except Exception as e:
-    logger.log_crash(f"Errore caricamento UNet: {e}")
     raise RuntimeError(f"Errore nel caricamento UNet: {e}")
 
 # ========= TRANSFORM FOR INFERENCE =========
@@ -117,7 +113,7 @@ def find_chromatic_band_in_folder(
 
 
 # ========= PREDICT MASK =========
-def safe_imread(path: Path, retries=3, delay=0.5):
+def safe_imread(path: Path, logger, retries=3, delay=0.5):
     for attempt in range(retries):
         img = cv2.imread(str(path))
         if img is not None:
@@ -126,7 +122,7 @@ def safe_imread(path: Path, retries=3, delay=0.5):
     logger.log_failure(path.name, "imread", f"Cannot read image after {retries} attempts", str(path))
     return None
 
-def predict_mask(image_path: Path):
+def predict_mask(image_path: Path, logger):
     try:
         img = Image.open(image_path).convert("RGB")
         tensor = transform(img).unsqueeze(0).to(DEVICE)
@@ -136,9 +132,6 @@ def predict_mask(image_path: Path):
             pred = torch.sigmoid(pred)
             pred = F.interpolate(pred, size=img.size[::-1], mode="bilinear", align_corners=False)
             pred = pred.squeeze().cpu().numpy()
-
-        # Debug logging
-        logger.log(image_path.name, "predict_mask", True, f"Raw pred min/max: {pred.min()}/{pred.max()}", str(image_path))
 
         mask = (pred > THRESHOLD).astype(np.uint8) * 255
         return np.array(img), mask
@@ -155,7 +148,7 @@ def get_bbox_from_mask(mask: np.ndarray):
     x, y, w, h = cv2.boundingRect(c)
     return x, y, w, h
 
-def measure_chromatic_band_dimension(path_input: Path, input_size=(256, 256)):
+def measure_chromatic_band_dimension(path_input: Path, logger, input_size=(256, 256)):
     try:
         img = safe_imread(path_input)
         if img is None:
@@ -183,12 +176,11 @@ def measure_chromatic_band_dimension(path_input: Path, input_size=(256, 256)):
         # Save debug visualization
         out_dir = OUTPUT_TMP_DIR / "segmentation_results"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{path_input.stem}_segmented.png"
+        out_path = out_dir / f"{path_input.parent.name}_{path_input.stem}_segmented.png"
         debug = cv2.drawContours(img.copy(), [cv2.boxPoints(rect).astype(int)], 0, (0,255,0), 2)
         cv2.imwrite(str(out_path), debug)
-        logger.log(path_input.name, "measure_chromatic_band_dimension", True, f"Segmentation saved: {out_path}", str(path_input))
-
         return (max(w,h), min(w,h))
+    
     except Exception as e:
         logger.log_failure(path_input.name, "measure_chromatic_band_dimension", f"{e}\n{traceback.format_exc()}", str(path_input))
         return None
@@ -229,17 +221,16 @@ def binaryize_image(image_path: Path, threshold: int = 50) -> Path | None:
     cv2.imwrite(str(dest_path), binary)
     return dest_path
 
-def analyze_chromatic_band(candidate: Path):
+def analyze_chromatic_band(candidate: Path, logger):
     try:
-        image, mask = predict_mask(candidate)
+        image, mask = predict_mask(candidate, logger)
         if image is None or mask is None:
             return None
 
-        mask_out_path = TMP_SEGMENTATION_MASK_DIR / f"{candidate.stem}_mask.png"
+        mask_out_path = TMP_SEGMENTATION_MASK_DIR / f"{candidate.parent.name}_{candidate.stem}_mask.png"
         cv2.imwrite(str(mask_out_path), mask)
-        logger.log(candidate.name, "mask_saved", True, f"Mask saved to {mask_out_path}", str(candidate))
 
-        bbox = get_bbox_from_mask(mask)
+        bbox = get_bbox_from_mask(mask, logger)
         if not bbox:
             logger.log_failure(candidate.name, "bbox", "No object found in mask", str(candidate))
             return None
@@ -247,13 +238,12 @@ def analyze_chromatic_band(candidate: Path):
         bbox_img = image.copy()
         x,y,w,h = bbox
         cv2.rectangle(bbox_img, (x,y), (x+w, y+h), (0,0,255), 6)
-        bbox_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.stem}_bbox.png"
+        bbox_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_bbox.png"
         cv2.imwrite(str(bbox_out_path), bbox_img)
-        logger.log(candidate.name, "bbox_saved", True, f"BBox saved to {bbox_out_path}", str(candidate))
 
-        chromatic_band_dim_px = measure_chromatic_band_dimension(candidate)
-        bin_img = binaryize_image(candidate)
-        bin_img_dim_px = measure_document_from_binary(bin_img)
+        chromatic_band_dim_px = measure_chromatic_band_dimension(candidate, logger)
+        bin_img = binaryize_image(candidate, logger)
+        bin_img_dim_px = measure_document_from_binary(bin_img, logger)
 
         if chromatic_band_dim_px is None or bin_img_dim_px is None:
             logger.log_failure(candidate.name, "analyze_chromatic_band", "Failed dimension measurement", str(candidate))
@@ -270,10 +260,6 @@ def analyze_chromatic_band(candidate: Path):
         height_ok = max(img_long_side_mm,img_short_side_mm) <= A4_HEIGHT_MM
 
         ppi = 400 if width_ok and height_ok else 600
-
-        logger.log(candidate.name, "analyze_chromatic_band", True,
-                   f"Result: A4={width_ok and height_ok}, scale={scale_factor:.2f}, ppi={ppi}",
-                   str(candidate))
 
         return {
             "mask_path": mask_out_path,
