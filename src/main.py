@@ -15,19 +15,18 @@ from math import ceil
 from src.utils import *
 from src.paths import *
 from src.config import *
-from src.image_utils import *
+from src.image_segmentation_pipeline import *
 from src.image_processing import *
 from src.worker import ImageWorker
 from src.segmentation.unet import UNet
 from logs.logger import CSVLogger
+from logs.logger import logger_istance
 from model.SR_Script.super_resolution import SA_SuperResolution
 from benchmark.benchmark import benchmark
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
-UNET = None
-
-
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------- Process batch ----------
 def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
@@ -76,27 +75,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         logger.log_crash(f"Errore caricamento modello SR: {e}")
         raise RuntimeError(f"Errore nel caricamento modello SR: {e}")
 
-    # ---------- Load UNET model ----------
-    print("🔍 Caricamento UNet per la segmentazione...")
-    try:
-        unet_model = UNet(n_channels=3, n_classes=1)
-        checkpoint = torch.load(
-            SAVE_PATH,
-            map_location=DEVICE  # or "cuda" if you want GPU
-        )
-
-        # load weights properly
-        if "model_state_dict" in checkpoint:
-            unet_model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            unet_model.load_state_dict(checkpoint)
-
-        # move to GPU (or CPU)
-        unet_model = unet_model.to(DEVICE)
-    except Exception as e:
-        logger.log_crash(f"Errore caricamento UNet: {e}")
-        raise RuntimeError(f"Errore nel caricamento UNet: {e}")
-
     manager = Manager()
     progress_queue = manager.Queue()
 
@@ -104,6 +82,29 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
     total_error = 0
 
     for folder in CONSERVATORIO_DIR.rglob("*"):
+        if not folder.is_dir():
+            continue
+
+        # Collect all valid images in this folder
+        images_in_folder = [p for p in folder.glob("*") if p.suffix.lower() in VALID_EXTS]
+        if not images_in_folder:
+            print(f"[DEBUG] Skipping empty folder: {folder}")
+            continue
+
+        print(f"[DEBUG] Checking folder: {folder}, {len(images_in_folder)} images")
+
+        # Find the one image with chromatic band
+        candidate = find_chromatic_band_in_folder(folder)
+        if candidate is None:
+            print(f"[DEBUG] No chromatic band found in {folder}, skipping.")
+            continue
+
+        print(f"[DEBUG] Found chromatic band in: {candidate}")
+
+        res = analyze_chromatic_band(candidate)
+        print(res)
+
+        continue
         if not folder.is_dir():
             continue
 
@@ -117,10 +118,10 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         # compute the corresponding downscaling folder
 
         relative_folder = folder.relative_to(CONSERVATORIO_DIR)
-        super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
+        super_resolution_dir, downscaling_dir = find_output_dir()
 
         # check if *all* images exist in target folder
-        all_exist = all((downscaling_dir / img.name).exists() for img in images)
+        all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images)
 
         if all_exist:
             logger.log(folder.name, "all_images_to_process", success=False, error="Tutte le immagini sono già state prrocessate", full_path=str(folder))
@@ -134,7 +135,8 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             logger.log_crash(f"Can't find a chromatic band: {e}", full_path=str(folder))
             continue
 
-        ppi = estimate_ppi_from_chromatic_band(chromatic_band_path, unet_model)
+        res = analyze_chromatic_band(chromatic_band_path)
+        ppi = res['ppi']
         if not ppi:
             logger.log(folder.name, "estimate_ppi", success=False, error="Impossibile stimare PPI", full_path=str(folder))
             print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
@@ -205,8 +207,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
     logger.sort_itslef()
 
-    exit(1)
-
 # ---------- Main ----------
 def main():
     if CSV_LOG_PATH.exists():
@@ -251,7 +251,7 @@ def main():
             tmp_dir = OUTPUT_TMP_DIR # or any directory you want to remove
             if tmp_dir.exists() and tmp_dir.is_dir():
                 print(f"🗑️ Pulizia della directory temporanea: {tmp_dir}")
-                #shutil.rmtree(tmp_dir, ignore_errors=True)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     logger.stop()
 

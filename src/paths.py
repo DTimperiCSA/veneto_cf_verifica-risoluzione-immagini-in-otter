@@ -8,8 +8,8 @@ REPO_DIR = DESKTOP_DIR / "github" / "Davide Timperi - Conservatorio Venezia"
 
 IMAGES_DIR = BASE_DIR / "images"
 INPUT_IMAGES_DIR = DESKTOP_DIR / "B001"
-OUTPUT_IMAGES_DIR = IMAGES_DIR / "output"
-OUTPUT_TMP_DIR = OUTPUT_IMAGES_DIR / "tmp"
+OUTPUT_IMAGES_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello") / "resolved_images"
+OUTPUT_TMP_DIR = REPO_DIR / "tmp"
 
 TEMPLATE_IMG_PATH = IMAGES_DIR / "assets" / "tiffen_template.tif"
 
