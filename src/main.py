@@ -20,7 +20,7 @@ from src.image_processing import *
 from src.worker import ImageWorker
 from src.segmentation.unet import UNet
 from logs.logger import CSVLogger
-from logs.logger import logger_istance
+from logs.logger_instance import *
 from model.SR_Script.super_resolution import SA_SuperResolution
 from benchmark.benchmark import benchmark
 
@@ -29,12 +29,9 @@ RETRY_DELAY = 5  # seconds
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------- Process batch ----------
-def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, progress_queue, ppi):
     from src.worker import ImageWorker
-    from logs.logger import CSVLogger
     from model.SR_Script.super_resolution import SA_SuperResolution
-
-    logger = CSVLogger(logger_path)
 
     model = SA_SuperResolution(
         models_dir=model_path,
@@ -44,7 +41,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         verbosity=False,
     )
 
-    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model, ppi)
+    worker = ImageWorker(super_resolution_dir, downscaling_dir, model, ppi)
     
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
@@ -61,7 +58,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
 
 
 # ---------- Standard processing ----------
-def run_standard_processing(processes, threads, logger: CSVLogger):
+def run_standard_processing(processes, threads):
     print("🔍 Caricamento modello di super-risoluzione (test iniziale)...")
     try:
         _ = SA_SuperResolution(
@@ -85,67 +82,64 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         if not folder.is_dir():
             continue
 
-        # Collect all valid images in this folder
-        images_in_folder = [p for p in folder.glob("*") if p.suffix.lower() in VALID_EXTS]
+        # --- raccolta immagini valide ---
+        images_in_folder = [p for p in folder.glob("*")
+                            if p.is_file() and p.name.lower() != "thumbs.db" and is_valid_image_file(p)[0]]
         if not images_in_folder:
-            print(f"[DEBUG] Skipping empty folder: {folder}")
+            logger.log(folder.name, "no_images_to_process", success=False,
+                    error="Nessuna immagine valida trovata", full_path=str(folder))
             continue
 
-        print(f"[DEBUG] Checking folder: {folder}, {len(images_in_folder)} images")
+        logger.log(folder.name, "folder_check", success=True,
+                error=f"{len(images_in_folder)} immagini valide trovate", full_path=str(folder))
 
-        # Find the one image with chromatic band
-        candidate = find_chromatic_band_in_folder(folder)
-        if candidate is None:
-            print(f"[DEBUG] No chromatic band found in {folder}, skipping.")
-            continue
-
-        print(f"[DEBUG] Found chromatic band in: {candidate}")
-
-        res = analyze_chromatic_band(candidate)
-        print(res)
-
-        continue
-        if not folder.is_dir():
-            continue
-
-        images = [f for f in folder.glob("*")  if f.is_file() and f.name.lower() != "thumbs.db" and is_valid_image_file(f)[0]]
-        if not images:
-            logger.log(folder.name, "no_images_to_process", success=False, error="Nessuna immagine da processare", full_path=str(folder))
-            continue
-        else:
-            print(f"📌 Processing {folder} with {len(images)} images")
-
-        # compute the corresponding downscaling folder
-
+        # --- check immagini già processate ---
         relative_folder = folder.relative_to(CONSERVATORIO_DIR)
         super_resolution_dir, downscaling_dir = find_output_dir()
-
-        # check if *all* images exist in target folder
-        all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images)
-
+        all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images_in_folder)
         if all_exist:
-            logger.log(folder.name, "all_images_to_process", success=False, error="Tutte le immagini sono già state prrocessate", full_path=str(folder))
+            logger.log(folder.name, "all_images_processed", success=False,
+                    error="Tutte le immagini sono già state processate", full_path=str(folder))
             continue
 
+        # --- ricerca banda cromatica ---
         try:
             chromatic_band_path = find_chromatic_band_in_folder(folder)
             if chromatic_band_path is None:
-                raise ValueError("Chromatic band is None")
+                logger.log(folder.name, "chromatic_band_search", success=False,
+                        error="Nessuna banda cromatica trovata", full_path=str(folder))
+                continue
+            logger.log(chromatic_band_path.name, "chromatic_band_found", success=True,
+                    error=f"Banda cromatica trovata in {chromatic_band_path}", full_path=str(chromatic_band_path))
+
+            # --- analisi banda cromatica ---
+            res = analyze_chromatic_band(chromatic_band_path)
+            if res is None:
+                logger.log_failure(chromatic_band_path.name, "full_analysis",
+                                "Analisi banda cromatica fallita", str(chromatic_band_path))
+                continue
+            else:
+                logger.log(chromatic_band_path.name, "full_analysis", success=True,
+                        error="Analisi completata con successo", full_path=str(chromatic_band_path))
+
+            # --- stima PPI ---
+            ppi = res.get('ppi', None)
+            if not ppi:
+                logger.log(folder.name, "estimate_ppi", success=False,
+                        error="Impossibile stimare PPI", full_path=str(folder))
+                continue
+            else:
+                logger.log(folder.name, "estimate_ppi", success=True,
+                        error=f"PPI stimati: {ppi}", full_path=str(folder))
+
         except Exception as e:
-            logger.log_crash(f"Can't find a chromatic band: {e}", full_path=str(folder))
+            logger.log_crash(f"Errore inatteso durante l'analisi di {folder}: {e}\n{traceback.format_exc()}",
+                            full_path=str(folder))
             continue
 
-        res = analyze_chromatic_band(chromatic_band_path)
-        ppi = res['ppi']
-        if not ppi:
-            logger.log(folder.name, "estimate_ppi", success=False, error="Impossibile stimare PPI", full_path=str(folder))
-            print(f"⚠️ Impossibile stimare PPI per {folder}. Skip cartella.")
-            continue
-            
-
-        # --- multiprocessing chunking and processing ---
-        chunk_size = ceil(len(images) / processes)
-        chunks = list(chunked(images, chunk_size))
+        # --- multiprocessing chunking ---
+        chunk_size = ceil(len(images_in_folder) / processes)
+        chunks = list(chunked(images_in_folder, chunk_size))
 
         target = partial(
             process_batch,
@@ -153,7 +147,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             super_resolution_dir=super_resolution_dir,
             downscaling_dir=downscaling_dir,
             model_path=SR_SCRIPT_MODEL_DIR,
-            logger_path=CSV_LOG_PATH,
             progress_queue=progress_queue,
             ppi=ppi
         )
@@ -163,8 +156,8 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             with Pool(processes) as pool:
                 result = pool.map_async(target, chunks)
                 completed = 0
-                with tqdm(total=len(images), desc="📷 Immagini elaborate", ncols=80) as pbar:
-                    while completed < len(images):
+                with tqdm(total=len(images_in_folder), desc="📷 Immagini elaborate", ncols=80) as pbar:
+                    while completed < len(images_in_folder):
                         try:
                             progress_queue.get(timeout=1)
                             completed += 1
@@ -179,13 +172,13 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                             continue
                 result.wait()
         except KeyboardInterrupt:
-            print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
+            logger.log_crash("Processo interrotto manualmente dall'utente")
             sys.exit(0)
         except Exception as e:
-            logger.log_crash(f"Errore multiprocessing: {e}")
+            logger.log_crash(f"Errore multiprocessing: {e}\n{traceback.format_exc()}")
             raise
 
-        # Conta successi e fallimenti
+        # --- conteggio successi e fallimenti ---
         folder_error_count = 0
         if CSV_LOG_PATH.exists():
             with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
@@ -195,11 +188,18 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                     if row["status"] == "false" and Path(row["full_path"]).parent.name == folder.name
                 )
 
-        folder_success = len(images) - folder_error_count
+        folder_success = len(images_in_folder) - folder_error_count
         total_success += folder_success
         total_error += folder_error_count
 
-        print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}\n")
+        logger.log(folder.name, "folder_summary", success=True,
+                error=f"Successi: {folder_success} | Errori: {folder_error_count}", full_path=str(folder))
+
+    # --- riepilogo finale ---
+    logger.sort_itslef()
+
+
+    print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}\n")
 
     print("\n📊 Risultato finale:")
     print(f"✅ Immagini processate con successo: {total_success}")
@@ -209,10 +209,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
 # ---------- Main ----------
 def main():
-    if CSV_LOG_PATH.exists():
-        print(f"📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
-        CSV_LOG_PATH.unlink()
-    logger = CSVLogger(CSV_LOG_PATH)
+    logger = init_logger(reset=True)
 
     # ---------- Check or run benchmark ----------
     if not JSON_BENCHMARK_BEST_CONFIG_PATH.exists():
@@ -232,7 +229,7 @@ def main():
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             print(f"\n🔁 Tentativo {attempt} di {MAX_ATTEMPTS}...\n")
-            run_standard_processing(processes, threads, logger)
+            run_standard_processing(processes, threads)
             print("✅ Elaborazione completata con successo.")
             break
         except KeyboardInterrupt:

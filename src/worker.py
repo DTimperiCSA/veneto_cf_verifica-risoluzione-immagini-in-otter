@@ -2,13 +2,16 @@ from pathlib import Path
 from src.utils import *
 from src.paths import *
 from src.config import *
-from src.image_utils import *
+from src.image_segmentation_pipeline import *
 from src.image_processing import apply_super_resolution_single, apply_personalized_downscaling_single
 from logs.logger import CSVLogger
+from logs.logger_instance import logger
+
+logger = get_logger()
+
 
 class ImageWorker:
-    def __init__(self, logger: CSVLogger, output_sr_dir: Path, output_final_dir: Path, sr_model, ppi: int = None):
-        self.logger = logger
+    def __init__(self, output_sr_dir: Path, output_final_dir: Path, sr_model, ppi: int = None):
         self.output_sr_dir = output_sr_dir
         self.output_final_dir = output_final_dir
         self.sr_model = sr_model
@@ -34,24 +37,24 @@ class ImageWorker:
                 try:
                     sr_output_path = apply_super_resolution_single(image_path, sr_output_dir, self.sr_model)
                 except Exception as e:
-                    self.logger.log(image_path, "super_resolution", success=False, error=f"Errore super_resolution: {e}")
+                    logger.log(image_path, "super_resolution", success=False, error=f"Errore super_resolution: {e}")
                     return
 
             # 5. Validazione SR
-            if not validate_image_with_logging(sr_output_path, "validate_super_resolution", self.logger):
+            if not validate_image_with_logging(sr_output_path, "validate_super_resolution", logger):
                 return
 
             # 6. Applica downscaling personalizzato
             try:
                 final_output_path = apply_personalized_downscaling_single(sr_output_path, downscale_output_dir, ppi=self.ppi)
             except Exception as e:
-                self.logger.log(image_path, "downscale", success=False, error=f"Errore downscale: {e}")
+                logger.log(image_path, "downscale", success=False, error=f"Errore downscale: {e}")
                 return
 
             # 7. Validazione downscale
-            if not validate_image_with_logging(final_output_path, "validate_downscale", self.logger):
+            if not validate_image_with_logging(final_output_path, "validate_downscale", logger):
                 return
 
 
         except Exception as e:
-            self.logger.log_crash(error=f"Unexpected error with {image_path}: {e}", full_path=image_path)
+            logger.log_crash(error=f"Unexpected error with {image_path}: {e}", full_path=image_path)
