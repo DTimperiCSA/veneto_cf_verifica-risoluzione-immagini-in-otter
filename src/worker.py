@@ -9,7 +9,6 @@ from logs.logger_instance import logger
 
 logger = get_logger()
 
-
 class ImageWorker:
     def __init__(self, output_sr_dir: Path, output_final_dir: Path, sr_model, ppi: int = None):
         self.output_sr_dir = output_sr_dir
