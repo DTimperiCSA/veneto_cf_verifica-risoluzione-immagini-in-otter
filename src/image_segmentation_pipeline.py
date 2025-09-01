@@ -8,7 +8,7 @@ from torchvision import transforms
 from src.segmentation.unet import UNet
 from src.paths import *
 from src.utils import *
-from logs.logger_instance import logger
+from logs.logger_instance import *
 import time
 import shutil
 
