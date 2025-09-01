@@ -5,7 +5,7 @@ from src.config import *
 from src.image_segmentation_pipeline import *
 from src.image_processing import apply_super_resolution_single, apply_personalized_downscaling_single
 from logs.logger import CSVLogger
-from logs.logger_instance import logger
+from logs.logger_instance import *
 
 logger = get_logger()
 
