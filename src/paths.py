@@ -6,7 +6,7 @@ DESKTOP_DIR = Path.home() / "Desktop"
 REPO_DIR = DESKTOP_DIR / "github" / "Davide Timperi - Conservatorio Venezia"
 
 IMAGES_DIR = BASE_DIR / "images"
-INPUT_IMAGES_DIR = DESKTOP_DIR / "B001"
+INPUT_IMAGES_DIR = Path(r"C:\Users\cultura\Desktop\github\Davide Timperi - Conservatorio Venezia\resize_lossless")
 OUTPUT_IMAGES_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello") / "resolved_images"
 OUTPUT_TMP_DIR = REPO_DIR / "tmp"
 
@@ -42,6 +42,6 @@ SRC_MASKS = DATA_TO_SPLIT_DIR / "masks"
 SRC_NO_MASK = DATA_TO_SPLIT_DIR / "images_no_mask"  # no masks
 SPLIT_DIR = DATASET_DIR
 
-TMP_SEGMENTATION_DIR = OUTPUT_TMP_DIR / "unet_segmentation"
+TMP_SEGMENTATION_DIR = REPO_DIR / "unet_segmentation"
 TMP_SEGMENTATION_MASK_DIR = TMP_SEGMENTATION_DIR / "masks"
 TMP_SEGMENTATION_BBOX_DIR = TMP_SEGMENTATION_DIR / "bbox"

@@ -24,24 +24,7 @@ template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 template_w, template_h = template_gray.shape[::-1]
 
 # ========= MODEL =========
-print("🔍 Caricamento modello UNet...")
-try:
-    model = UNet(n_channels=3, n_classes=1)
-    checkpoint = torch.load(
-        SAVE_PATH,
-        map_location=DEVICE  # or "cuda" if you want GPU
-    )
 
-    # load weights properly
-    if "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
-    else:
-        model.load_state_dict(checkpoint)
-
-    # move to GPU (or CPU)
-    model = model.to(DEVICE)
-except Exception as e:
-    raise RuntimeError(f"Errore nel caricamento UNet: {e}")
 
 # ========= TRANSFORM FOR INFERENCE =========
 transform = transforms.Compose([
@@ -51,15 +34,6 @@ transform = transforms.Compose([
 ])
 
 # ========= TEMPLATE MATCHING =========
-def contains_chromatic_band(image_path: Path, threshold: float = 0.7) -> bool:
-    img = cv2.imread(str(image_path))
-    if img is None:
-        return False
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-    return max_val >= threshold
-
 def find_chromatic_band_in_folder(
     folder: Path
 ) -> str | None:
@@ -75,12 +49,13 @@ def find_chromatic_band_in_folder(
     template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
     if template is None:
         raise ValueError(f"Could not load template image: {template_path}")
-    t_h, t_w = template.shape[:2]
 
     best_match = None
     best_val = -1
     total_images = 0
-    skipped_small = 0
+
+    # scale factors da provare (puoi regolare la lista)
+    scales = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     for img_path in folder.iterdir():
         if img_path.is_file():
@@ -95,20 +70,33 @@ def find_chromatic_band_in_folder(
                 continue
 
             i_h, i_w = img.shape[:2]
-            if i_h < t_h or i_w < t_w:
-                continue
 
-            # Template matching
-            res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(res)
+            # prova template a scale diverse
+            for scale in scales:
+                new_w = int(template.shape[1] * scale)
+                new_h = int(template.shape[0] * scale)
 
-            if max_val > best_val:
-                best_val = max_val
-                best_match = img_path
+                if new_w <= 5 or new_h <= 5:
+                    continue  # template troppo piccolo
+                if i_h < new_h or i_w < new_w:
+                    continue  # template più grande dell’immagine
 
+                resized_template = cv2.resize(template, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+                # Template matching
+                res = cv2.matchTemplate(img, resized_template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
+
+                if max_val > best_val:
+                    best_val = max_val
+                    best_match = img_path
+
+    # Soglia per considerare il match valido
     if best_match is not None and best_val > 0.5:
+        print(f"✅ Banda trovata: {best_match} (score={best_val:.3f})")
         return Path(best_match)
     else:
+        print(f"❌ Nessuna banda trovata (miglior score={best_val:.3f})")
         return None
 
 
@@ -122,7 +110,7 @@ def safe_imread(path: Path, logger, retries=3, delay=0.5):
     logger.log_failure(path.name, "imread", f"Cannot read image after {retries} attempts", str(path))
     return None
 
-def predict_mask(image_path: Path, logger):
+def predict_mask(image_path: Path, model, logger):
     try:
         img = Image.open(image_path).convert("RGB")
         tensor = transform(img).unsqueeze(0).to(DEVICE)
@@ -148,46 +136,9 @@ def get_bbox_from_mask(mask: np.ndarray):
     x, y, w, h = cv2.boundingRect(c)
     return x, y, w, h
 
-def measure_chromatic_band_dimension(path_input: Path, logger, input_size=(256, 256)):
-    try:
-        img = safe_imread(path_input)
-        if img is None:
-            return None
-        orig_h, orig_w = img.shape[:2]
-
-        img_resized = cv2.resize(img, input_size)
-        img_tensor = torch.from_numpy(img_resized).float().permute(2,0,1).unsqueeze(0)/255.0
-        img_tensor = img_tensor.to(DEVICE)
-
-        with torch.no_grad():
-            pred = model(img_tensor)
-            pred = torch.sigmoid(pred)
-            mask = (pred > 0.5).float().cpu().numpy()[0,0]
-
-        mask = cv2.resize(mask.astype(np.uint8), (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            logger.log_failure(path_input.name, "measure_chromatic_band_dimension", "No contours found", str(path_input))
-            return None
-
-        rect = cv2.minAreaRect(max(contours, key=cv2.contourArea))
-        (cx,cy),(w,h),angle = rect
-
-        # Save debug visualization
-        out_dir = OUTPUT_TMP_DIR / "segmentation_results"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{path_input.parent.name}_{path_input.stem}_segmented.png"
-        debug = cv2.drawContours(img.copy(), [cv2.boxPoints(rect).astype(int)], 0, (0,255,0), 2)
-        cv2.imwrite(str(out_path), debug)
-        return (max(w,h), min(w,h))
-    
-    except Exception as e:
-        logger.log_failure(path_input.name, "measure_chromatic_band_dimension", f"{e}\n{traceback.format_exc()}", str(path_input))
-        return None
-
-def measure_document_from_binary(binary_image_path: Path) -> tuple[float, float] | None:
+def measure_document_from_binary(binary_image_path: Path, logger) -> tuple[float, float] | None:
     """Return (long_side_px, short_side_px) from binary image contour."""
-    img = safe_imread(binary_image_path)
+    img = safe_imread(binary_image_path, logger)
     if img is None:
         return None
 
@@ -200,14 +151,14 @@ def measure_document_from_binary(binary_image_path: Path) -> tuple[float, float]
     (_, _), (w, h), _ = rect
     return (max(w, h), min(w, h))
 
-def binaryize_image(image_path: Path, threshold: int = 50) -> Path | None:
+def binaryize_image(image_path: Path, logger, threshold: int = 50) -> Path | None:
     """Convert image to binary (thresholded) and save to OUTPUT_TMP_DIR."""
     valid, msg = is_valid_image_file(image_path)
     if not valid:
         print(f"⚠️ Invalid file: {image_path} | {msg}")
         return None
 
-    img = safe_imread(image_path)
+    img = safe_imread(image_path, logger)
     if img is None:
         return None
 
@@ -221,49 +172,69 @@ def binaryize_image(image_path: Path, threshold: int = 50) -> Path | None:
     cv2.imwrite(str(dest_path), binary)
     return dest_path
 
-def analyze_chromatic_band(candidate: Path, logger):
+def analyze_chromatic_band(candidate: Path, unet_model, logger):
     try:
-        image, mask = predict_mask(candidate, logger)
+        image, mask = predict_mask(candidate, unet_model, logger)
         if image is None or mask is None:
             return None
 
+        # --- Save mask for debug ---
         mask_out_path = TMP_SEGMENTATION_MASK_DIR / f"{candidate.parent.name}_{candidate.stem}_mask.png"
         cv2.imwrite(str(mask_out_path), mask)
 
-        bbox = get_bbox_from_mask(mask, logger)
+        # --- Axis-aligned bbox ---
+        bbox = get_bbox_from_mask(mask)
         if not bbox:
             logger.log_failure(candidate.name, "bbox", "No object found in mask", str(candidate))
             return None
 
         bbox_img = image.copy()
-        x,y,w,h = bbox
-        cv2.rectangle(bbox_img, (x,y), (x+w, y+h), (0,0,255), 6)
+        x, y, w, h = bbox
+        cv2.rectangle(bbox_img, (x, y), (x + w, y + h), (0, 0, 255), 6)
         bbox_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_bbox.png"
         cv2.imwrite(str(bbox_out_path), bbox_img)
 
-        chromatic_band_dim_px = measure_chromatic_band_dimension(candidate, logger)
+        # --- Rotated bbox (minAreaRect) for chromatic band dimensions ---
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            logger.log_failure(candidate.name, "minAreaRect", "No contours found", str(candidate))
+            return None
+
+        rect = cv2.minAreaRect(max(contours, key=cv2.contourArea))
+        (_, _), (w_rect, h_rect), _ = rect
+        chromatic_band_long_side_px, chromatic_band_short_side_px = max(w_rect, h_rect), min(w_rect, h_rect)
+
+        # Debug image with rotated bbox
+        rect_img = image.copy()
+        box_points = cv2.boxPoints(rect).astype(int)
+        cv2.drawContours(rect_img, [box_points], 0, (0, 255, 0), 2)
+        rect_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_rotated_bbox.png"
+        cv2.imwrite(str(rect_out_path), rect_img)
+
+        # --- Document binary measurement ---
         bin_img = binaryize_image(candidate, logger)
         bin_img_dim_px = measure_document_from_binary(bin_img, logger)
 
-        if chromatic_band_dim_px is None or bin_img_dim_px is None:
-            logger.log_failure(candidate.name, "analyze_chromatic_band", "Failed dimension measurement", str(candidate))
+        if bin_img_dim_px is None:
+            logger.log_failure(candidate.name, "analyze_chromatic_band", "Failed document dimension measurement", str(candidate))
             return None
 
+        # --- Final calculations ---
         img_long_side_px, img_short_side_px = max(bin_img_dim_px), min(bin_img_dim_px)
-        chromatic_band_long_side_px, chromatic_band_short_side_px = max(chromatic_band_dim_px), min(chromatic_band_dim_px)
 
         scale_factor = CHROMATIC_BAND_MM / chromatic_band_long_side_px
         img_long_side_mm = img_long_side_px * scale_factor
         img_short_side_mm = img_short_side_px * scale_factor
 
-        width_ok = min(img_long_side_mm,img_short_side_mm) <= A4_WIDTH_MM
-        height_ok = max(img_long_side_mm,img_short_side_mm) <= A4_HEIGHT_MM
+        width_ok = min(img_long_side_mm, img_short_side_mm) <= A4_WIDTH_MM
+        height_ok = max(img_long_side_mm, img_short_side_mm) <= A4_HEIGHT_MM
 
         ppi = 400 if width_ok and height_ok else 600
 
         return {
             "mask_path": mask_out_path,
             "bbox_path": bbox_out_path,
+            "rotated_bbox_path": rect_out_path,
             "bbox": bbox,
             "chromatic_band_px": (chromatic_band_long_side_px, chromatic_band_short_side_px),
             "img_px": (img_long_side_px, img_short_side_px),
@@ -274,5 +245,10 @@ def analyze_chromatic_band(candidate: Path, logger):
         }
 
     except Exception as e:
-        logger.log_failure(candidate.name, "analyze_chromatic_band", f"{e}\n{traceback.format_exc()}", str(candidate))
+        logger.log_failure(
+            candidate.name,
+            "analyze_chromatic_band",
+            f"{e}\n{traceback.format_exc()}",
+            str(candidate),
+        )
         return None

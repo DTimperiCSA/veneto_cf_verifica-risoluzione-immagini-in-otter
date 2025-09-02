@@ -7,7 +7,7 @@ from src.image_processing import apply_super_resolution_single, apply_personaliz
 from logs.logger import CSVLogger
 
 class ImageWorker:
-    def __init__(self, output_sr_dir: Path, output_final_dir: Path, sr_model, logger, ppi: int = None):
+    def __init__(self, logger: CSVLogger, output_sr_dir: Path, output_final_dir: Path, sr_model, ppi: int = None):
         self.logger = logger
         self.output_sr_dir = output_sr_dir
         self.output_final_dir = output_final_dir

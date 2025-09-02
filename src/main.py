@@ -34,7 +34,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
 
     logger = CSVLogger(logger_path)
 
-    model = SA_SuperResolution(
+    sr_model = SA_SuperResolution(
         models_dir=model_path,
         model_scale=SUPER_RESOLUTION_PAR,
         tile_size=128,
@@ -42,7 +42,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         verbosity=False,
     )
 
-    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, model, ppi)
+    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, sr_model, ppi)
     
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
@@ -56,6 +56,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
                 progress_queue.put(1)
 
     logger.stop()
+
 
 
 # ---------- Standard processing ----------
@@ -72,6 +73,25 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
     except Exception as e:
         logger.log_crash(f"Errore caricamento modello SR: {e}")
         raise RuntimeError(f"Errore nel caricamento modello SR: {e}")
+    
+    print("🔍 Caricamento modello UNet...")
+    try:
+        unet_model = UNet(n_channels=3, n_classes=1)
+        checkpoint = torch.load(
+            SAVE_PATH,
+            map_location=DEVICE  # or "cuda" if you want GPU
+        )
+
+        # load weights properly
+        if "model_state_dict" in checkpoint:
+            unet_model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            unet_model.load_state_dict(checkpoint)
+
+        # move to GPU (or CPU)
+        unet_model = unet_model.to(DEVICE)
+    except Exception as e:
+        raise RuntimeError(f"Errore nel caricamento UNet: {e}")
 
     manager = Manager()
     progress_queue = manager.Queue()
@@ -79,22 +99,36 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
     total_success = 0
     total_error = 0
 
-    for folder in CONSERVATORIO_DIR.rglob("*"):
-        print(f"📌 Analisi del percorso: {folder}")
+    PATHS_TO_SKIP_FOR_NOW = {
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B078.006"),
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B081.004"),
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B083.012"),
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B088.001"),
+    }
+
+    print(INPUT_IMAGES_DIR)
+    for folder in INPUT_IMAGES_DIR.rglob("*"):
 
         if not folder.is_dir():
+            continue
+
+        #if Path(folder) in PATHS_TO_SKIP_FOR_NOW:
+            print("Skip")
             continue
 
         # --- raccolta immagini valide ---
         images_in_folder = [p for p in folder.glob("*")
                             if p.is_file() and p.name.lower() != "thumbs.db" and is_valid_image_file(p)[0]]
+        
+        print(f"📌 Analisi del percorso: {folder} con {len(images_in_folder)} immagini")
+
         if not images_in_folder:
             logger.log(folder.name, "no_images_to_process", success=False,
                     error="Nessuna immagine valida trovata", full_path=str(folder))
             continue
 
         # --- check immagini già processate ---
-        relative_folder = folder.relative_to(CONSERVATORIO_DIR)
+        relative_folder = folder.relative_to(INPUT_IMAGES_DIR)
         super_resolution_dir, downscaling_dir = find_output_dir()
         all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images_in_folder)
         if all_exist:
@@ -111,7 +145,8 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                 continue
 
             # --- analisi banda cromatica ---
-            res = analyze_chromatic_band(chromatic_band_path, logger)
+            res = analyze_chromatic_band(chromatic_band_path, unet_model, logger)
+            print(res)
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
                                 "Analisi banda cromatica fallita", str(chromatic_band_path))
@@ -168,11 +203,12 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                             continue
                 result.wait()
         except KeyboardInterrupt:
-            logger.log_crash("Processo interrotto manualmente dall'utente")
+            print("\n[🚪] Interrotto manualmente dall'utente. Uscita.")
             sys.exit(0)
         except Exception as e:
-            logger.log_crash(f"Errore multiprocessing: {e}\n{traceback.format_exc()}")
+            logger.log_crash(f"Errore multiprocessing: {e}")
             raise
+
 
         # --- conteggio successi e fallimenti ---
         folder_error_count = 0
@@ -188,11 +224,11 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         total_success += folder_success
         total_error += folder_error_count
 
+        print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}\n")
     # --- riepilogo finale ---
     logger.sort_itslef()
 
-
-    print(f"   ✅ Successi: {folder_success} | ❌ Errori: {folder_error_count}\n")
+    
 
     print("\n📊 Risultato finale:")
     print(f"✅ Immagini processate con successo: {total_success}")
