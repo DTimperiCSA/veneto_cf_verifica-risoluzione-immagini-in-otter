@@ -134,6 +134,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         if all_exist:
             logger.log(folder.name, "all_images_processed", success=False,
                     error="Tutte le immagini sono già state processate", full_path=str(folder))
+            print("✅ Tutte le immagini sono già state processate")
             continue
 
         # --- ricerca banda cromatica ---
@@ -142,6 +143,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             if chromatic_band_path is None:
                 logger.log(folder.name, "chromatic_band_search", success=False,
                         error="Nessuna banda cromatica trovata", full_path=str(folder))
+                print("❌ Nessuna banda cromatica trovata")
                 continue
 
             # --- analisi banda cromatica ---
@@ -150,6 +152,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
                                 "Analisi banda cromatica fallita", str(chromatic_band_path))
+                print("❌ Analisi banda cromatica fallita")
                 continue
 
             # --- stima PPI ---
@@ -157,6 +160,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             if not ppi:
                 logger.log(folder.name, "estimate_ppi", success=False,
                         error="Impossibile stimare PPI", full_path=str(folder))
+                print("❌ Impossibile stimare PPI")
                 continue
             else:
                 logger.log(folder.name, "estimate_ppi", success=True,
