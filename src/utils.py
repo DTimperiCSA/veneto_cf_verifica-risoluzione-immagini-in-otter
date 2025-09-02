@@ -2,6 +2,7 @@ import os
 import traceback
 import numpy as np
 import csv
+import json
 
 from PIL import Image
 from pathlib import Path
@@ -9,6 +10,23 @@ from typing import Tuple
 
 from src.paths import *
 from src.config import *
+
+def save_results_to_json(results: dict, output_path: Path):
+    # Convert all Path objects to string (recursively)
+    def convert(o):
+        if isinstance(o, Path):
+            return str(o)
+        if isinstance(o, (list, tuple)):
+            return [convert(x) for x in o]
+        if isinstance(o, dict):
+            return {k: convert(v) for k, v in o.items()}
+        return o
+
+    results_serializable = convert(results)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(results_serializable, f, indent=4, ensure_ascii=False)
 
 def validate_image_with_logging(image_path, step, logger):
     valid, err = is_valid_image_file(image_path)
@@ -61,7 +79,7 @@ def find_output_dir(relative_folder) -> tuple[Path, Path]:
 
     # Dynamically construct directories
     super_res_dir = Path(OUTPUT_IMAGES_DIR) / f"sr_{final_super_res_suffix}" / relative_folder
-    downscaling_dir = Path(OUTPUT_IMAGES_DIR) / f"downscaled_{final_super_res_suffix}" /relative_folder
+    downscaling_dir = Path(OUTPUT_IMAGES_DIR) / f"downscaled_{final_super_res_suffix}" / relative_folder
 
     # Create directories if they don’t exist
     os.makedirs(super_res_dir, exist_ok=True)

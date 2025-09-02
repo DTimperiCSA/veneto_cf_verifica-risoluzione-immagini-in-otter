@@ -106,7 +106,9 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B088.001"),
     }
 
-    for folder in CONSERVATORIO_DIR.rglob("*"):
+    ANALYZE_DIR = CONSERVATORIO_DIR
+
+    for folder in ANALYZE_DIR.rglob("*"):
 
         if not folder.is_dir():
             continue
@@ -127,7 +129,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             continue
 
         # --- check immagini già processate ---
-        relative_folder = folder.relative_to(CONSERVATORIO_DIR)
+        relative_folder = folder.relative_to(ANALYZE_DIR)
         super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
         print(f"Searching all processed images in {downscaling_dir}")
 
@@ -149,12 +151,17 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
             # --- analisi banda cromatica ---
             res = analyze_chromatic_band(chromatic_band_path, unet_model, logger)
-            print(res)
+
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
                                 "Analisi banda cromatica fallita", str(chromatic_band_path))
                 print("❌ Analisi banda cromatica fallita")
                 continue
+
+            chromatic_band_path = Path(chromatic_band_path)
+            save_path = TMP_SEGMENTATION_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
+            save_results_to_json(res, save_path)
+            print(f"✅ Risultati salvati in {save_path}")
 
             # --- stima PPI ---
             ppi = res.get('ppi', None)

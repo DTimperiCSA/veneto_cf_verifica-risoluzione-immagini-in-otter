@@ -17,6 +17,7 @@ THRESHOLD = 0.5  # You can adjust this threshold depending on your model's outpu
 
 TMP_SEGMENTATION_MASK_DIR.mkdir(parents=True, exist_ok=True)
 TMP_SEGMENTATION_BBOX_DIR.mkdir(parents=True, exist_ok=True)
+TMP_SEGMENTATION_ROT_BBOX_DIR.mkdir(parents=True, exist_ok=True)
 
 COL_KP = (255, 0, 0)
 template = cv2.imread(str(TEMPLATE_IMG_PATH))
@@ -174,27 +175,30 @@ def binaryize_image(image_path: Path, logger, threshold: int = 50) -> Path | Non
 
 def analyze_chromatic_band(candidate: Path, unet_model, logger):
     try:
+        # --- predizione mask ---
         image, mask = predict_mask(candidate, unet_model, logger)
         if image is None or mask is None:
             return None
 
-        # --- Save mask for debug ---
+        # --- salva mask ---
+        TMP_SEGMENTATION_MASK_DIR.mkdir(parents=True, exist_ok=True)
         mask_out_path = TMP_SEGMENTATION_MASK_DIR / f"{candidate.parent.name}_{candidate.stem}_mask.png"
         cv2.imwrite(str(mask_out_path), mask)
 
-        # --- Axis-aligned bbox ---
+        # --- bbox axis-aligned ---
         bbox = get_bbox_from_mask(mask)
         if not bbox:
             logger.log_failure(candidate.name, "bbox", "No object found in mask", str(candidate))
             return None
 
+        TMP_SEGMENTATION_BBOX_DIR.mkdir(parents=True, exist_ok=True)
         bbox_img = image.copy()
         x, y, w, h = bbox
         cv2.rectangle(bbox_img, (x, y), (x + w, y + h), (0, 0, 255), 6)
         bbox_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_bbox.png"
         cv2.imwrite(str(bbox_out_path), bbox_img)
 
-        # --- Rotated bbox (minAreaRect) for chromatic band dimensions ---
+        # --- rotated bbox (minAreaRect) per dimensione banda cromatica ---
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             logger.log_failure(candidate.name, "minAreaRect", "No contours found", str(candidate))
@@ -204,24 +208,23 @@ def analyze_chromatic_band(candidate: Path, unet_model, logger):
         (_, _), (w_rect, h_rect), _ = rect
         chromatic_band_long_side_px, chromatic_band_short_side_px = max(w_rect, h_rect), min(w_rect, h_rect)
 
-        # Debug image with rotated bbox
+        TMP_SEGMENTATION_ROT_BBOX_DIR.mkdir(parents=True, exist_ok=True)
         rect_img = image.copy()
         box_points = cv2.boxPoints(rect).astype(int)
         cv2.drawContours(rect_img, [box_points], 0, (0, 255, 0), 2)
-        rect_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_rotated_bbox.png"
+        rect_out_path = TMP_SEGMENTATION_ROT_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}.png"
         cv2.imwrite(str(rect_out_path), rect_img)
 
-        # --- Document binary measurement ---
+        # --- dimensione documento da immagine binaria ---
         bin_img = binaryize_image(candidate, logger)
         bin_img_dim_px = measure_document_from_binary(bin_img, logger)
-
         if bin_img_dim_px is None:
             logger.log_failure(candidate.name, "analyze_chromatic_band", "Failed document dimension measurement", str(candidate))
             return None
 
-        # --- Final calculations ---
         img_long_side_px, img_short_side_px = max(bin_img_dim_px), min(bin_img_dim_px)
 
+        # --- calcolo scale factor e dimensioni mm ---
         scale_factor = CHROMATIC_BAND_MM / chromatic_band_long_side_px
         img_long_side_mm = img_long_side_px * scale_factor
         img_short_side_mm = img_short_side_px * scale_factor
@@ -231,10 +234,11 @@ def analyze_chromatic_band(candidate: Path, unet_model, logger):
 
         ppi = 400 if width_ok and height_ok else 600
 
+        # --- ritorno dict pronto per JSON ---
         return {
-            "mask_path": mask_out_path,
-            "bbox_path": bbox_out_path,
-            "rotated_bbox_path": rect_out_path,
+            "mask_path": str(mask_out_path),
+            "bbox_path": str(bbox_out_path),
+            "rotated_bbox_path": str(rect_out_path),
             "bbox": bbox,
             "chromatic_band_px": (chromatic_band_long_side_px, chromatic_band_short_side_px),
             "img_px": (img_long_side_px, img_short_side_px),
@@ -252,3 +256,4 @@ def analyze_chromatic_band(candidate: Path, unet_model, logger):
             str(candidate),
         )
         return None
+

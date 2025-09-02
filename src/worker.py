@@ -21,8 +21,8 @@ class ImageWorker:
             complete_path = image_path.parent
 
             # Directory output
-            sr_output_dir = self.output_sr_dir / top_folder
-            downscale_output_dir = self.output_final_dir / top_folder
+            sr_output_dir = self.output_sr_dir 
+            downscale_output_dir = self.output_final_dir
             sr_output_path = sr_output_dir / filename
             final_output_path = downscale_output_dir / filename
 
