@@ -119,7 +119,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         images_in_folder = [p for p in folder.glob("*")
                             if p.is_file() and p.name.lower() != "thumbs.db" and is_valid_image_file(p)[0]]
         
-        print(f"📌 Analisi del percorso: {folder} con {len(images_in_folder)} immagini")
+        print(f"\n📌 Analisi del percorso: {folder} con {len(images_in_folder)} immagini")
 
         if not images_in_folder:
             logger.log(folder.name, "no_images_to_process", success=False,
