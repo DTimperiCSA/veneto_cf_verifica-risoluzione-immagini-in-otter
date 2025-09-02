@@ -106,14 +106,13 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B088.001"),
     }
 
-    print(INPUT_IMAGES_DIR)
-    for folder in INPUT_IMAGES_DIR.rglob("*"):
+    for folder in CONSERVATORIO_DIR.rglob("*"):
 
         if not folder.is_dir():
             continue
 
-        #if Path(folder) in PATHS_TO_SKIP_FOR_NOW:
-            print("Skip")
+        if Path(folder) in PATHS_TO_SKIP_FOR_NOW:
+            print(f"Skipped {folder} for now (check code)")
             continue
 
         # --- raccolta immagini valide ---
@@ -128,9 +127,11 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             continue
 
         # --- check immagini già processate ---
-        relative_folder = folder.relative_to(INPUT_IMAGES_DIR)
-        super_resolution_dir, downscaling_dir = find_output_dir()
-        all_exist = all((downscaling_dir / relative_folder / img.name).exists() for img in images_in_folder)
+        relative_folder = folder.relative_to(CONSERVATORIO_DIR)
+        super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
+        print(f"Searching all processed images in {downscaling_dir}")
+
+        all_exist = all((downscaling_dir / img.name).exists() for img in images_in_folder)
         if all_exist:
             logger.log(folder.name, "all_images_processed", success=False,
                     error="Tutte le immagini sono già state processate", full_path=str(folder))
