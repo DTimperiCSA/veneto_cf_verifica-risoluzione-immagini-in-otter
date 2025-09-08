@@ -111,6 +111,29 @@ def safe_imread(path: Path, logger, retries=3, delay=0.5):
     logger.log_failure(path.name, "imread", f"Cannot read image after {retries} attempts", str(path))
     return None
 
+def sharpen_mask(prob_map: np.ndarray, threshold: float = 0.5, min_area: int = 500) -> np.ndarray:
+    """
+    Post-processes a probability map to produce a sharp rectangular mask.
+    - Thresholds the prob map
+    - Finds largest contours
+    - Fits rectangles to them
+    """
+    # Convert to binary mask
+    mask = (prob_map > threshold).astype(np.uint8) * 255
+
+    # Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    clean_mask = np.zeros_like(mask)
+
+    for cnt in contours:
+        if cv2.contourArea(cnt) > min_area:
+            rect = cv2.minAreaRect(cnt)   # rotated rectangle
+            box = cv2.boxPoints(rect)
+            box = np.int32(box)
+            cv2.drawContours(clean_mask, [box], 0, 255, -1)
+
+    return clean_mask
+
 def predict_mask(image_path: Path, model, logger):
     try:
         img = Image.open(image_path).convert("RGB")
@@ -122,12 +145,15 @@ def predict_mask(image_path: Path, model, logger):
             pred = F.interpolate(pred, size=img.size[::-1], mode="bilinear", align_corners=False)
             pred = pred.squeeze().cpu().numpy()
 
-        mask = (pred > THRESHOLD).astype(np.uint8) * 255
+        # Usa sharpen_mask per ottenere maschera rettangolare
+        mask = sharpen_mask(pred, threshold=THRESHOLD, min_area=500)
+
         return np.array(img), mask
 
     except Exception as e:
         logger.log_failure(image_path.name, "predict_mask", f"{e}\n{traceback.format_exc()}", str(image_path))
         return None, None
+
 
 def get_bbox_from_mask(mask: np.ndarray):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -256,4 +282,181 @@ def analyze_chromatic_band(candidate: Path, unet_model, logger):
             str(candidate),
         )
         return None
+
+
+def largest_component_mask(mask: np.ndarray):
+    """Ritorna la componente con area massima in una mask binaria."""
+    cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None, None
+    largest = max(cnts, key=cv2.contourArea)
+    big_mask = np.zeros_like(mask)
+    cv2.drawContours(big_mask, [largest], -1, 255, thickness=-1)
+    return big_mask, largest
+
+# ========= ORB KEYPOINT MATCHING =========
+def method_keypoint_orb(img: np.ndarray, template: np.ndarray):
+    """
+    Usa ORB keypoints + RANSAC per allineare template e generare mask poligonale.
+    """
+    try:
+        orb = cv2.ORB_create(3000)
+        kp1, des1 = orb.detectAndCompute(template, None)
+        kp2, des2 = orb.detectAndCompute(img, None)
+        if des1 is None or des2 is None:
+            return None
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(des1, des2)
+        matches = sorted(matches, key=lambda x: x.distance)[:3000]
+        if len(matches) < 8:
+            return None
+
+        # estraggo coordinate punti matchati
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+
+        # stima affine (RANSAC)
+        M, inliers_mask = cv2.estimateAffinePartial2D(
+            src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=5.0
+        )
+        if M is None:
+            return None
+
+        # trasformo angoli del template
+        h, w = template.shape[:2]
+        corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 2)
+        transformed = cv2.transform(np.array([corners]), M)[0].astype(int)
+        transformed[:, 0] = np.clip(transformed[:, 0], 0, img.shape[1] - 1)
+        transformed[:, 1] = np.clip(transformed[:, 1], 0, img.shape[0] - 1)
+
+        # creo mask riempiendo il poligono trasformato
+        mask_poly = np.zeros(img.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask_poly, [transformed], 255)
+
+        # tengo solo la componente più grande
+        big, largest = largest_component_mask(mask_poly)
+        if big is not None:
+            mask_poly = big
+
+        # creo overlay per debug
+        overlay = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
+        cv2.drawContours(overlay, [transformed], -1, COL_KP, 3)
+
+        # ritaglio ROI
+        minx, maxx = int(np.min(transformed[:, 0])), int(np.max(transformed[:, 0]))
+        miny, maxy = int(np.min(transformed[:, 1])), int(np.max(transformed[:, 1]))
+        roi = overlay[miny:maxy + 1, minx:maxx + 1].copy() if maxx > minx and maxy > miny else None
+
+        return {
+            "method": "keypoint",
+            "mask": mask_poly,
+            "overlay": overlay,
+            "roi": roi,
+            "meta": {
+                "matches": len(matches),
+                "inliers": int(inliers_mask.sum()) if inliers_mask is not None else None
+            }
+        }
+    except Exception:
+        return None
+
+# ========= ANALISI CHROMATIC BAND =========
+def analyze_chromatic_band_keypoint(candidate: Path, logger):
+    """
+    Analizza immagine usando ORB keypoints per trovare la banda cromatica.
+    Salva mask, bbox, bbox ruotato e ritorna misure in mm/px.
+    """
+    try:
+        # carica immagine
+        img = cv2.imdecode(np.fromfile(str(candidate), dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            logger.log_failure(candidate.name, "read", "Failed to load image", str(candidate))
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # carica template
+        tpl_bgr = cv2.imdecode(np.fromfile(str(TEMPLATE_IMG_PATH), dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl_bgr is None:
+            logger.log_failure(candidate.name, "template", f"Cannot read TEMPLATE {TEMPLATE_IMG_PATH}", str(candidate))
+            return None
+        template_gray = cv2.cvtColor(tpl_bgr, cv2.COLOR_BGR2GRAY)
+
+        # ottieni mask via keypoint ORB
+        res = method_keypoint_orb(gray, template_gray)
+        if res is None:
+            logger.log_failure(candidate.name, "keypoint_orb", "Failed to align template", str(candidate))
+            return None
+        mask = res["mask"]
+
+        # salva mask
+        mask_out_path = TMP_SEGMENTATION_MASK_DIR / f"{candidate.parent.name}_{candidate.stem}_mask.png"
+        cv2.imwrite(str(mask_out_path), mask)
+
+        # bounding box axis aligned
+        bbox = get_bbox_from_mask(mask)
+        if not bbox:
+            logger.log_failure(candidate.name, "bbox", "No object found in mask", str(candidate))
+            return None
+        x, y, w, h = bbox
+        bbox_img = img.copy()
+        cv2.rectangle(bbox_img, (x, y), (x + w, y + h), (0, 0, 255), 6)
+        bbox_out_path = TMP_SEGMENTATION_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}_bbox.png"
+        cv2.imwrite(str(bbox_out_path), bbox_img)
+
+        # bounding box ruotato (per misura precisa)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            logger.log_failure(candidate.name, "minAreaRect", "No contours found", str(candidate))
+            return None
+        rect = cv2.minAreaRect(max(contours, key=cv2.contourArea))
+        (_, _), (w_rect, h_rect), _ = rect
+        chromatic_band_long_side_px, chromatic_band_short_side_px = max(w_rect, h_rect), min(w_rect, h_rect)
+
+        rect_img = img.copy()
+        box_points = cv2.boxPoints(rect).astype(int)
+        cv2.drawContours(rect_img, [box_points], 0, (0, 255, 0), 2)
+        rect_out_path = TMP_SEGMENTATION_ROT_BBOX_DIR / f"{candidate.parent.name}_{candidate.stem}.png"
+        cv2.imwrite(str(rect_out_path), rect_img)
+
+        # misura documento
+        bin_img = binaryize_image(candidate, logger)
+        bin_img_dim_px = measure_document_from_binary(bin_img, logger)
+        if bin_img_dim_px is None:
+            logger.log_failure(candidate.name, "analyze_chromatic_band", "Failed document dimension measurement", str(candidate))
+            return None
+        img_long_side_px, img_short_side_px = max(bin_img_dim_px), min(bin_img_dim_px)
+
+        # calcolo scala (px -> mm)
+        scale_factor = CHROMATIC_BAND_MM / chromatic_band_long_side_px
+        img_long_side_mm = img_long_side_px * scale_factor
+        img_short_side_mm = img_short_side_px * scale_factor
+
+        # controllo compatibilità con A4
+        width_ok = min(img_long_side_mm, img_short_side_mm) <= A4_WIDTH_MM
+        height_ok = max(img_long_side_mm, img_short_side_mm) <= A4_HEIGHT_MM
+        ppi = 400 if width_ok and height_ok else 600
+
+        return {
+            "mask_path": str(mask_out_path),
+            "bbox_path": str(bbox_out_path),
+            "rotated_bbox_path": str(rect_out_path),
+            "bbox": bbox,
+            "chromatic_band_px": (chromatic_band_long_side_px, chromatic_band_short_side_px),
+            "img_px": (img_long_side_px, img_short_side_px),
+            "img_mm": (img_long_side_mm, img_short_side_mm),
+            "scale_factor": scale_factor,
+            "is_A4": width_ok and height_ok,
+            "ppi": ppi
+        }
+
+    except Exception as e:
+        logger.log_failure(
+            candidate.name,
+            "analyze_chromatic_band_keypoint",
+            f"{e}\n{traceback.format_exc()}",
+            str(candidate),
+        )
+        return None
+
 

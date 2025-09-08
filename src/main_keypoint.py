@@ -106,17 +106,16 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B088.001"),
     }
 
-    KEYPOINT_PATHS = {
+    ANALYZE_DIR = [
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B002\B002.034"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B008\B008.003"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B012\B012.020"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B020\B020.001"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B020\B020.002"),
-    }
+    ]
 
-    ANALYZE_DIR = CONSERVATORIO_DIR
 
-    for folder in ANALYZE_DIR.rglob("*"):
+    for folder in ANALYZE_DIR:
 
         if not folder.is_dir():
             continue
@@ -135,9 +134,9 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             logger.log(folder.name, "no_images_to_process", success=False,
                     error="Nessuna immagine valida trovata", full_path=str(folder))
             continue
-
+        
         # --- check immagini già processate ---
-        relative_folder = folder.relative_to(ANALYZE_DIR)
+        relative_folder = folder.relative_to(CONSERVATORIO_DIR)
         super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
         print(f"Searching all processed images in {downscaling_dir}")
 
@@ -158,10 +157,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                 continue
 
             # --- analisi banda cromatica ---
-            if Path(folder) in KEYPOINT_PATHS:
-                res = analyze_chromatic_band_keypoint(chromatic_band_path, logger)
-            else:
-                res = analyze_chromatic_band(chromatic_band_path, unet_model, logger)
+            res = analyze_chromatic_band_keypoint(chromatic_band_path, logger)
 
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
