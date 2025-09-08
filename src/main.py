@@ -22,6 +22,7 @@ from src.segmentation.unet import UNet
 from logs.logger import CSVLogger
 from model.SR_Script.super_resolution import SA_SuperResolution
 from benchmark.benchmark import benchmark
+from src.image_segmentation_pipeline_approssimated import *
 
 MAX_ATTEMPTS = 10
 RETRY_DELAY = 5  # seconds
@@ -159,9 +160,9 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
             # --- analisi banda cromatica ---
             if Path(folder) in KEYPOINT_PATHS:
-                res = analyze_chromatic_band_keypoint(chromatic_band_path, logger)
+                res = analyze_chromatic_band_keypoint_approximated(chromatic_band_path, logger)
             else:
-                res = analyze_chromatic_band(chromatic_band_path, unet_model, logger)
+                res = analyze_chromatic_band_approximated(chromatic_band_path, unet_model, logger)
 
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
@@ -170,7 +171,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                 continue
 
             chromatic_band_path = Path(chromatic_band_path)
-            save_path = TMP_SEGMENTATION_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
+            save_path = TMP_SEGMENTATION_BBOX_MINUS_PERCENT_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
             save_results_to_json(res, save_path)
             print(f"✅ Risultati salvati in {save_path}")
 

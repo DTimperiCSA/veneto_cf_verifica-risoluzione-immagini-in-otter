@@ -8,6 +8,8 @@ REPO_DIR = DESKTOP_DIR / "github" / "Davide Timperi - Conservatorio Venezia"
 IMAGES_DIR = BASE_DIR / "images"
 INPUT_IMAGES_DIR = Path(r"C:\Users\cultura\Desktop\github\Davide Timperi - Conservatorio Venezia\resize_lossless")
 OUTPUT_IMAGES_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello") / "resolved_images"
+OUTPUT_IMAGES_APPR_DIR = Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello") / "resolved_images_approx"
+
 OUTPUT_TMP_DIR = REPO_DIR / "tmp"
 
 TEMPLATE_IMG_PATH = IMAGES_DIR / "assets" / "tiffen_template.tif"
@@ -46,3 +48,8 @@ TMP_SEGMENTATION_DIR = REPO_DIR / "unet_segmentation"
 TMP_SEGMENTATION_MASK_DIR = TMP_SEGMENTATION_DIR / "masks"
 TMP_SEGMENTATION_BBOX_DIR = TMP_SEGMENTATION_DIR / "bbox"
 TMP_SEGMENTATION_ROT_BBOX_DIR = TMP_SEGMENTATION_DIR / "rotated_bbox"
+
+TMP_SEGMENTATION_MINUS_PERCENT_DIR = REPO_DIR / "unet_segmentation_approximated"
+TMP_SEGMENTATION_MASK_MINUS_PERCENT_DIR = TMP_SEGMENTATION_MINUS_PERCENT_DIR / "masks"
+TMP_SEGMENTATION_BBOX_MINUS_PERCENT_DIR = TMP_SEGMENTATION_MINUS_PERCENT_DIR / "bbox"
+TMP_SEGMENTATION_ROT_BBOX_MINUS_PERCENT_DIR = TMP_SEGMENTATION_MINUS_PERCENT_DIR / "rotated_bbox"
