@@ -16,6 +16,7 @@ TEMPLATE_IMG_PATH = IMAGES_DIR / "assets" / "tiffen_template.tif"
 
 CSV_LOG_DIR = BASE_DIR / "logs"
 CSV_LOG_PATH = CSV_LOG_DIR / "processing_log.csv"
+CSV_LOG_APPR_PATH = CSV_LOG_DIR / "processing_log_appr.csv"
 
 MODEL_DIR = BASE_DIR / "model"
 CHECKPOINT_DIR = MODEL_DIR / "checkpoints"

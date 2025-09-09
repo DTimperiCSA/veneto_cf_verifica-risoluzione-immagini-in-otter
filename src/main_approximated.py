@@ -101,6 +101,8 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
     total_error = 0
 
     PATHS_TO_SKIP_FOR_NOW = {
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B001.001"),
+        Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B001.002"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B078.006"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B081.004"),
         Path(r"Z:\Digital Library\Conservatorio Benedetto Marcello\Conservatorio\B083.012"),
@@ -134,7 +136,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             folder = RESIZED_DIR / folder.name
             ANALYZE_DIR = RESIZED_DIR
         """
-        
+            
         # --- raccolta immagini valide ---
         images_in_folder = [p for p in folder.glob("*")
                             if p.is_file() and p.name.lower() != "thumbs.db" and is_valid_image_file(p)[0]]
@@ -148,7 +150,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
         # --- check immagini già processate ---
         relative_folder = folder.relative_to(ANALYZE_DIR)
-        super_resolution_dir, downscaling_dir = find_output_dir(relative_folder)
+        super_resolution_dir, downscaling_dir = find_output_dir_appr(relative_folder)
         print(f"Searching all processed images in {downscaling_dir}")
 
         all_exist = all((downscaling_dir / img.name).exists() for img in images_in_folder)
@@ -169,9 +171,9 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
             # --- analisi banda cromatica ---
             if Path(folder) in KEYPOINT_PATHS:
-                res = analyze_chromatic_band_keypoint(chromatic_band_path, logger)
+                res = analyze_chromatic_band_keypoint_approximated(chromatic_band_path, logger)
             else:
-                res = analyze_chromatic_band(chromatic_band_path, unet_model, logger)
+                res = analyze_chromatic_band_approximated(chromatic_band_path, unet_model, logger)
 
             if res is None:
                 logger.log_failure(chromatic_band_path.name, "full_analysis",
@@ -180,9 +182,11 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
                 continue
 
             chromatic_band_path = Path(chromatic_band_path)
-            save_path = TMP_SEGMENTATION_BBOX_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
+            save_path = TMP_SEGMENTATION_MINUS_PERCENT_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
             save_results_to_json(res, save_path)
             print(f"✅ Risultati salvati in {save_path}")
+
+            continue
 
             # --- stima PPI ---
             ppi = res.get('ppi', None)
@@ -210,7 +214,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             super_resolution_dir=super_resolution_dir,
             downscaling_dir=downscaling_dir,
             model_path=SR_SCRIPT_MODEL_DIR,
-            logger_path=CSV_LOG_PATH,
+            logger_path=CSV_LOG_APPR_PATH,
             progress_queue=progress_queue,
             ppi=ppi
         )
@@ -245,8 +249,8 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
         # --- conteggio successi e fallimenti ---
         folder_error_count = 0
-        if CSV_LOG_PATH.exists():
-            with open(CSV_LOG_PATH, "r", encoding="utf-8") as f:
+        if CSV_LOG_APPR_PATH.exists():
+            with open(CSV_LOG_APPR_PATH, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 folder_error_count = sum(
                     1 for row in reader
@@ -271,10 +275,10 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
 
 # ---------- Main ----------
 def main():
-    if CSV_LOG_PATH.exists():
-        print(f"📜 Log esistente trovato: {CSV_LOG_PATH}. Rimuovo per una nuova esecuzione.")
-        CSV_LOG_PATH.unlink()
-    logger = CSVLogger(CSV_LOG_PATH)
+    if CSV_LOG_APPR_PATH.exists():
+        print(f"📜 Log esistente trovato: {CSV_LOG_APPR_PATH}. Rimuovo per una nuova esecuzione.")
+        CSV_LOG_APPR_PATH.unlink()
+    logger = CSVLogger(CSV_LOG_APPR_PATH)
 
     # ---------- Check or run benchmark ----------
     if not JSON_BENCHMARK_BEST_CONFIG_PATH.exists():
@@ -314,7 +318,7 @@ def main():
             if tmp_dir.exists() and tmp_dir.is_dir():
                 print(f"🗑️ Pulizia della directory temporanea: {tmp_dir}")
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-                super_resolution_dir, downscaling_dir = find_output_dir()
+                super_resolution_dir, downscaling_dir = find_output_dir_appr()
                 print(f"🗑️ Pulizia della directory temporanea: {super_resolution_dir}")
                 shutil.rmtree(super_resolution_dir, ignore_errors=True)
 
