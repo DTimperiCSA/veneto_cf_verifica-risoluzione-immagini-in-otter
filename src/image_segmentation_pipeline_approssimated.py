@@ -434,9 +434,10 @@ def analyze_chromatic_band_keypoint_approximated(candidate: Path, logger):
         img_short_side_px *= 0.95
 
         # calcolo scala (px -> mm)
-        scale_factor = CHROMATIC_BAND_MM / chromatic_band_long_side_px
-        img_long_side_mm = img_long_side_px * scale_factor
-        img_short_side_mm = img_short_side_px * scale_factor
+        mm_per_px = CHROMATIC_BAND_MM / chromatic_band_long_side_px
+        
+        img_long_side_mm = img_long_side_px * mm_per_px
+        img_short_side_mm = img_short_side_px * mm_per_px
 
         # controllo compatibilità con A4
         width_ok = min(img_long_side_mm, img_short_side_mm) <= A4_WIDTH_MM
@@ -451,7 +452,7 @@ def analyze_chromatic_band_keypoint_approximated(candidate: Path, logger):
             "chromatic_band_px": (chromatic_band_long_side_px, chromatic_band_short_side_px),
             "img_px": (img_long_side_px, img_short_side_px),
             "img_mm": (img_long_side_mm, img_short_side_mm),
-            "scale_factor": scale_factor,
+            "mm_per_px": mm_per_px,
             "is_A4": width_ok and height_ok,
             "ppi": ppi
         }

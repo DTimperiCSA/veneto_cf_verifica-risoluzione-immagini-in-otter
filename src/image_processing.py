@@ -51,7 +51,7 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path, sr_model: 
     return output_path
 
 
-def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, analysis_res) -> Path:
+def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, analysis_result) -> Path:
     """
     Resize a super-resolved image based on PPI info in filename.
 
@@ -66,25 +66,28 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, an
         ValueError: If PPI is invalid or unsupported.
         RuntimeError: If image loading or saving fails.
     """
-    ppi = analysis_res.get('ppi', None)
-    img_mm = analysis_res.get('img_px', None)
-    img_long_side_mm, img_short_side_mm = max(img_mm), min(img_mm)
+    ppi = analysis_result.get('ppi', None)
+    img_px = analysis_result.get('img_px', None)
+    img_long_side_px, img_short_side_px = max(img_px), min(img_px)
+    chromatic_band_long_side_px = max(analysis_result.get('chromatic_band_px', None))
 
-    pixel_per_mm = ppi / INCH_CONVERSION
+    target_ruler_px = (CHROMATIC_BAND_MM / 25.4) * ppi
 
-    img_long_side_target_px = img_long_side_mm * pixel_per_mm
-    img_short_side_target_px = img_short_side_mm * pixel_per_mm
+    scaling_factor = target_ruler_px / chromatic_band_long_side_px
+
+    img_long_side_px *= scaling_factor
+    img_short_side_px *= scaling_factor
 
     try:
         with Image.open(image_path) as image:
             width, height = image.size
 
             if width >= height:  # Lato lungo = width
-                new_width = int(img_long_side_target_px)
-                new_height = int(img_short_side_target_px)
+                new_width = int(img_long_side_px)
+                new_height = int(img_short_side_px)
             else:  # Lato lungo = height
-                new_width = int(img_short_side_target_px)
-                new_height = int(img_long_side_target_px)
+                new_width = int(img_short_side_px)
+                new_height = int(img_long_side_px)
                 
             new_size = (new_width, new_height)
             resized_img = image.resize(new_size, resample=Image.LANCZOS)

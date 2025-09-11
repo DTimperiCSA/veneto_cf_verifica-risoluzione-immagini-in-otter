@@ -130,12 +130,15 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
         if Path(folder) in PATHS_TO_SKIP_FOR_NOW:
             print(f"Skipped {folder} for now (check code)")
             continue
-            
-        """
+        
+        print(folder.name)
+        print(folder.name in CORRECTED_DIR)
         if folder.name in CORRECTED_DIR:
             folder = RESIZED_DIR / folder.name
-            ANALYZE_DIR = RESIZED_DIR
-        """
+            ANALYZE_DIR = RESIZED_DIR 
+        
+        print(folder)
+        print(ANALYZE_DIR )
             
         # --- raccolta immagini valide ---
         images_in_folder = [p for p in folder.glob("*")
@@ -185,8 +188,6 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             save_path = TMP_SEGMENTATION_MINUS_PERCENT_DIR / "json" / f"{chromatic_band_path.parent.name}_{chromatic_band_path.stem}_analysis.json"
             save_results_to_json(res, save_path)
             print(f"✅ Risultati salvati in {save_path}")
-
-            continue
 
             # --- stima PPI ---
             ppi = res.get('ppi', None)
