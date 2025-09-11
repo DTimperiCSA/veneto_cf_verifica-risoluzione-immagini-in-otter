@@ -7,12 +7,12 @@ from src.image_processing import apply_super_resolution_single, apply_personaliz
 from logs.logger import CSVLogger
 
 class ImageWorker:
-    def __init__(self, logger: CSVLogger, output_sr_dir: Path, output_final_dir: Path, sr_model, ppi: int = None):
+    def __init__(self, logger: CSVLogger, output_sr_dir: Path, output_final_dir: Path, sr_model, analysis_result):
         self.logger = logger
         self.output_sr_dir = output_sr_dir
         self.output_final_dir = output_final_dir
         self.sr_model = sr_model
-        self.ppi = ppi
+        self.analysis_result = analysis_result
 
     def run(self, image_path: Path):
         try:
@@ -43,7 +43,7 @@ class ImageWorker:
 
             # 6. Applica downscaling personalizzato
             try:
-                final_output_path = apply_personalized_downscaling_single(sr_output_path, downscale_output_dir, ppi=self.ppi)
+                final_output_path = apply_personalized_downscaling_single(sr_output_path, downscale_output_dir, analysis_result=self.analysis_result)
             except Exception as e:
                 self.logger.log(image_path, "downscale", success=False, error=f"Errore downscale: {e}")
                 return

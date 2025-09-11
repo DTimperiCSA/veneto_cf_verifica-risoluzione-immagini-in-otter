@@ -51,7 +51,7 @@ def apply_super_resolution_single(image_path: Path, output_dir: Path, sr_model: 
     return output_path
 
 
-def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, ppi = int) -> Path:
+def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, analysis_res) -> Path:
     """
     Resize a super-resolved image based on PPI info in filename.
 
@@ -66,24 +66,26 @@ def apply_personalized_downscaling_single(image_path: Path, output_dir: Path, pp
         ValueError: If PPI is invalid or unsupported.
         RuntimeError: If image loading or saving fails.
     """
+    ppi = analysis_res.get('ppi', None)
+    img_mm = analysis_res.get('img_px', None)
+    img_long_side_mm, img_short_side_mm = max(img_mm), min(img_mm)
 
-    if ppi == 400:
-        chromatic_ruler = CHROMATIC_BAND_400_PPI
-        target_ruler_px = TARGET_RULER_PX_400_PPI
-    elif ppi == 600:
-        chromatic_ruler = CHROMATIC_BAND_600_PPI
-        target_ruler_px = TARGET_RULER_PX_600_PPI
+    pixel_per_mm = ppi / INCH_CONVERSION
 
-    original_ruler_inch = chromatic_ruler["width_mm"] / INCH_CONVERSION
-    original_ruler_px = SUPER_RESOLUTION_PAR * chromatic_ruler["ppi"] * original_ruler_inch
-
-    scale_factor = target_ruler_px / original_ruler_px
-    scale_factor *= chromatic_ruler["correction_factor"]
+    img_long_side_target_px = img_long_side_mm * pixel_per_mm
+    img_short_side_target_px = img_short_side_mm * pixel_per_mm
 
     try:
         with Image.open(image_path) as image:
-            new_width = int(image.width * scale_factor)
-            new_height = int(image.height * scale_factor)
+            width, height = image.size
+
+            if width >= height:  # Lato lungo = width
+                new_width = int(img_long_side_target_px)
+                new_height = int(img_short_side_target_px)
+            else:  # Lato lungo = height
+                new_width = int(img_short_side_target_px)
+                new_height = int(img_long_side_target_px)
+                
             new_size = (new_width, new_height)
             resized_img = image.resize(new_size, resample=Image.LANCZOS)
     except Exception as e:

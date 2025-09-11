@@ -29,7 +29,7 @@ RETRY_DELAY = 5  # seconds
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------- Process batch ----------
-def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, ppi):
+def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_path, logger_path, progress_queue, analysis_result):
     from src.worker import ImageWorker
     from model.SR_Script.super_resolution import SA_SuperResolution
 
@@ -43,7 +43,7 @@ def process_batch(images, threads, super_resolution_dir, downscaling_dir, model_
         verbosity=False,
     )
 
-    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, sr_model, ppi)
+    worker = ImageWorker(logger, super_resolution_dir, downscaling_dir, sr_model, analysis_result)
     
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(worker.run, img): img for img in images}
@@ -216,7 +216,7 @@ def run_standard_processing(processes, threads, logger: CSVLogger):
             model_path=SR_SCRIPT_MODEL_DIR,
             logger_path=CSV_LOG_APPR_PATH,
             progress_queue=progress_queue,
-            ppi=ppi
+            analysis_result=res
         )
 
         try:
